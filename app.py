@@ -237,6 +237,39 @@ def download_file(job_id):
     return send_file(j['file'], as_attachment=True, download_name=j['filename'])
 
 
+@app.route('/api/formats', methods=['POST'])
+def list_formats():
+    """Debug endpoint — returns raw format list for a URL."""
+    url = (request.json or {}).get('url', '').strip()
+    if not url:
+        return jsonify({'error': 'No URL'}), 400
+    try:
+        opts = {
+            'quiet': True,
+            'no_warnings': False,
+            'extractor_args': {'youtube': {'player_client': ['ios', 'tv_embedded', 'web']}},
+        }
+        if os.path.exists(COOKIE_FILE):
+            opts['cookiefile'] = COOKIE_FILE
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+        formats = [
+            {
+                'id':       f.get('format_id'),
+                'ext':      f.get('ext'),
+                'protocol': f.get('protocol'),
+                'res':      f.get('resolution') or f'{f.get("width","?")}x{f.get("height","?")}',
+                'vcodec':   f.get('vcodec'),
+                'acodec':   f.get('acodec'),
+                'tbr':      f.get('tbr'),
+            }
+            for f in info.get('formats', [])
+        ]
+        return jsonify({'title': info.get('title'), 'format_count': len(formats), 'formats': formats})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
 @app.route('/health')
 def health():
     return jsonify({'status': 'ok', 'service': 'grabha'})
