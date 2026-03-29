@@ -9,13 +9,6 @@ CORS(app)
 DOWNLOAD_DIR = '/tmp/grabha'
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Write cookies from env var to a file yt-dlp can use
-COOKIE_FILE = '/tmp/grabha/cookies.txt'
-_cookies_env = os.environ.get('YOUTUBE_COOKIES', '')
-if _cookies_env:
-    with open(COOKIE_FILE, 'w', encoding='utf-8') as _f:
-        _f.write(_cookies_env)
-
 # In-memory job store
 jobs = {}
 
@@ -84,20 +77,16 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             jobs[job_id]['log'].append('[download] processing file…')
 
     quality_map = {
-        'best': 'bestvideo[ext=mp4]+bestaudio[ext=mp4]/bestvideo+bestaudio/best',
-        '1080': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=mp4]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-        '720':  'bestvideo[ext=mp4][height<=720]+bestaudio[ext=mp4]/bestvideo[height<=720]+bestaudio/best[height<=720]/best',
-        '480':  'bestvideo[ext=mp4][height<=480]+bestaudio[ext=mp4]/bestvideo[height<=480]+bestaudio/best[height<=480]/best',
-        '360':  'bestvideo[ext=mp4][height<=360]+bestaudio[ext=mp4]/bestvideo[height<=360]+bestaudio/best[height<=360]/best',
+        'best': 'bestvideo+bestaudio/best',
+        '1080': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+        '720':  'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
+        '480':  'bestvideo[height<=480]+bestaudio/best[height<=480]/best',
+        '360':  'bestvideo[height<=360]+bestaudio/best[height<=360]/best',
     }
-
-    cookie_opts = {'cookiefile': COOKIE_FILE} if os.path.exists(COOKIE_FILE) else {}
-
-    extractor_args = {'youtube': {'player_client': ['ios', 'tv_embedded', 'web']}}
 
     if format_type == 'mp3':
         ydl_opts = {
-            'format': 'bestaudio[ext=mp4]/bestaudio/best',
+            'format': 'bestaudio/best',
             'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
@@ -107,23 +96,15 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             'progress_hooks': [progress_hook],
             'quiet': True,
             'no_warnings': True,
-            'ignoreerrors': False,
-            'format_sort': ['proto:m3u8', 'res', 'ext:mp4:m4a'],
-            'extractor_args': extractor_args,
-            **cookie_opts,
         }
     else:
         ydl_opts = {
-            'format': quality_map.get(quality, 'bestvideo[ext=mp4]+bestaudio[ext=mp4]/bestvideo+bestaudio/best'),
+            'format': quality_map.get(quality, 'bestvideo+bestaudio/best'),
             'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
             'merge_output_format': 'mp4',
             'progress_hooks': [progress_hook],
             'quiet': True,
             'no_warnings': True,
-            'ignoreerrors': False,
-            'format_sort': ['proto:m3u8', 'res', 'ext:mp4:m4a'],
-            'extractor_args': extractor_args,
-            **cookie_opts,
         }
 
     # Apply clip section if provided
@@ -164,14 +145,7 @@ def get_info():
     if not url:
         return jsonify({'error': 'No URL'}), 400
     try:
-        info_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'extractor_args': {'youtube': {'player_client': ['ios', 'tv_embedded', 'web']}},
-        }
-        if os.path.exists(COOKIE_FILE):
-            info_opts['cookiefile'] = COOKIE_FILE
-        with yt_dlp.YoutubeDL(info_opts) as ydl:
+        with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
             info = ydl.extract_info(url, download=False)
         return jsonify({
             'title':     info.get('title', 'Unknown'),
@@ -235,39 +209,6 @@ def download_file(job_id):
     if j['status'] != 'done':
         return jsonify({'error': 'File not ready'}), 400
     return send_file(j['file'], as_attachment=True, download_name=j['filename'])
-
-
-@app.route('/api/formats', methods=['POST'])
-def list_formats():
-    """Debug endpoint — returns raw format list for a URL."""
-    url = (request.json or {}).get('url', '').strip()
-    if not url:
-        return jsonify({'error': 'No URL'}), 400
-    try:
-        opts = {
-            'quiet': True,
-            'no_warnings': False,
-            'extractor_args': {'youtube': {'player_client': ['ios', 'tv_embedded', 'web']}},
-        }
-        if os.path.exists(COOKIE_FILE):
-            opts['cookiefile'] = COOKIE_FILE
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False, process=False)
-        formats = [
-            {
-                'id':       f.get('format_id'),
-                'ext':      f.get('ext'),
-                'protocol': f.get('protocol'),
-                'res':      f.get('resolution') or f'{f.get("width","?")}x{f.get("height","?")}',
-                'vcodec':   f.get('vcodec'),
-                'acodec':   f.get('acodec'),
-                'tbr':      f.get('tbr'),
-            }
-            for f in info.get('formats', [])
-        ]
-        return jsonify({'title': info.get('title'), 'format_count': len(formats), 'formats': formats})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
 
 
 @app.route('/health')
