@@ -9,6 +9,13 @@ CORS(app)
 DOWNLOAD_DIR = '/tmp/grabha'
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+# Write cookies from env var to a file yt-dlp can use
+COOKIE_FILE = '/tmp/grabha/cookies.txt'
+_cookies_env = os.environ.get('YOUTUBE_COOKIES', '')
+if _cookies_env:
+    with open(COOKIE_FILE, 'w', encoding='utf-8') as _f:
+        _f.write(_cookies_env)
+
 # In-memory job store
 jobs = {}
 
@@ -84,6 +91,8 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
         '360':  'bestvideo[height<=360]+bestaudio/best[height<=360]',
     }
 
+    cookie_opts = {'cookiefile': COOKIE_FILE} if os.path.exists(COOKIE_FILE) else {}
+
     if format_type == 'mp3':
         ydl_opts = {
             'format': 'bestaudio/best',
@@ -96,6 +105,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             'progress_hooks': [progress_hook],
             'quiet': True,
             'no_warnings': True,
+            **cookie_opts,
         }
     else:
         ydl_opts = {
@@ -105,6 +115,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             'progress_hooks': [progress_hook],
             'quiet': True,
             'no_warnings': True,
+            **cookie_opts,
         }
 
     # Apply clip section if provided
@@ -145,7 +156,10 @@ def get_info():
     if not url:
         return jsonify({'error': 'No URL'}), 400
     try:
-        with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
+        info_opts = {'quiet': True, 'no_warnings': True}
+        if os.path.exists(COOKIE_FILE):
+            info_opts['cookiefile'] = COOKIE_FILE
+        with yt_dlp.YoutubeDL(info_opts) as ydl:
             info = ydl.extract_info(url, download=False)
         return jsonify({
             'title':     info.get('title', 'Unknown'),
