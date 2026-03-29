@@ -6,7 +6,7 @@ import os, uuid, threading, time, re
 app = Flask(__name__)
 CORS(app)
 
-DOWNLOAD_DIR = '/tmp/drishyagrahana'
+DOWNLOAD_DIR = '/tmp/grabha'
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # In-memory job store
@@ -213,7 +213,7 @@ def download_file(job_id):
 
 @app.route('/health')
 def health():
-    return jsonify({'status': 'ok', 'service': 'drishyagrahana'})
+    return jsonify({'status': 'ok', 'service': 'grabha'})
 
 
 if __name__ == '__main__':
