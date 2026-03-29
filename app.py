@@ -252,7 +252,7 @@ def list_formats():
         if os.path.exists(COOKIE_FILE):
             opts['cookiefile'] = COOKIE_FILE
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+            info = ydl.extract_info(url, download=False, process=False)
         formats = [
             {
                 'id':       f.get('format_id'),
