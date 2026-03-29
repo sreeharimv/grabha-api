@@ -84,11 +84,11 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             jobs[job_id]['log'].append('[download] processing file…')
 
     quality_map = {
-        'best': 'bestvideo+bestaudio/best/bestvideo/bestaudio',
-        '1080': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-        '720':  'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
-        '480':  'bestvideo[height<=480]+bestaudio/best[height<=480]/best',
-        '360':  'bestvideo[height<=360]+bestaudio/best[height<=360]/best',
+        'best': 'bestvideo[ext=mp4]+bestaudio[ext=mp4]/bestvideo+bestaudio/best',
+        '1080': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=mp4]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+        '720':  'bestvideo[ext=mp4][height<=720]+bestaudio[ext=mp4]/bestvideo[height<=720]+bestaudio/best[height<=720]/best',
+        '480':  'bestvideo[ext=mp4][height<=480]+bestaudio[ext=mp4]/bestvideo[height<=480]+bestaudio/best[height<=480]/best',
+        '360':  'bestvideo[ext=mp4][height<=360]+bestaudio[ext=mp4]/bestvideo[height<=360]+bestaudio/best[height<=360]/best',
     }
 
     cookie_opts = {'cookiefile': COOKIE_FILE} if os.path.exists(COOKIE_FILE) else {}
@@ -97,7 +97,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
 
     if format_type == 'mp3':
         ydl_opts = {
-            'format': 'bestaudio/best/bestvideo',
+            'format': 'bestaudio[ext=mp4]/bestaudio/best',
             'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
@@ -108,20 +108,20 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             'quiet': True,
             'no_warnings': True,
             'ignoreerrors': False,
-            'format_sort': ['res', 'ext:mp4:m4a'],
+            'format_sort': ['proto:m3u8', 'res', 'ext:mp4:m4a'],
             'extractor_args': extractor_args,
             **cookie_opts,
         }
     else:
         ydl_opts = {
-            'format': quality_map.get(quality, 'bestvideo+bestaudio/best/bestvideo/bestaudio'),
+            'format': quality_map.get(quality, 'bestvideo[ext=mp4]+bestaudio[ext=mp4]/bestvideo+bestaudio/best'),
             'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
             'merge_output_format': 'mp4',
             'progress_hooks': [progress_hook],
             'quiet': True,
             'no_warnings': True,
             'ignoreerrors': False,
-            'format_sort': ['res', 'ext:mp4:m4a'],
+            'format_sort': ['proto:m3u8', 'res', 'ext:mp4:m4a'],
             'extractor_args': extractor_args,
             **cookie_opts,
         }
