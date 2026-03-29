@@ -1,7 +1,8 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 import yt_dlp
 import os, uuid, threading, time, re
+import requests as http_requests
 
 app = Flask(__name__)
 CORS(app)
@@ -209,6 +210,19 @@ def download_file(job_id):
     if j['status'] != 'done':
         return jsonify({'error': 'File not ready'}), 400
     return send_file(j['file'], as_attachment=True, download_name=j['filename'])
+
+
+@app.route('/api/proxy-thumb')
+def proxy_thumb():
+    url = request.args.get('url', '').strip()
+    if not url:
+        return jsonify({'error': 'No URL'}), 400
+    try:
+        r = http_requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10, stream=True)
+        content_type = r.headers.get('Content-Type', 'image/jpeg')
+        return Response(r.content, content_type=content_type)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 502
 
 
 @app.route('/health')
