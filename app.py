@@ -93,6 +93,8 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
 
     cookie_opts = {'cookiefile': COOKIE_FILE} if os.path.exists(COOKIE_FILE) else {}
 
+    extractor_args = {'youtube': {'player_client': ['ios', 'tv_embedded', 'web']}}
+
     if format_type == 'mp3':
         ydl_opts = {
             'format': 'bestaudio/best/bestvideo',
@@ -107,6 +109,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             'no_warnings': True,
             'ignoreerrors': False,
             'format_sort': ['res', 'ext:mp4:m4a'],
+            'extractor_args': extractor_args,
             **cookie_opts,
         }
     else:
@@ -119,6 +122,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             'no_warnings': True,
             'ignoreerrors': False,
             'format_sort': ['res', 'ext:mp4:m4a'],
+            'extractor_args': extractor_args,
             **cookie_opts,
         }
 
@@ -160,7 +164,11 @@ def get_info():
     if not url:
         return jsonify({'error': 'No URL'}), 400
     try:
-        info_opts = {'quiet': True, 'no_warnings': True}
+        info_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extractor_args': {'youtube': {'player_client': ['ios', 'tv_embedded', 'web']}},
+        }
         if os.path.exists(COOKIE_FILE):
             info_opts['cookiefile'] = COOKIE_FILE
         with yt_dlp.YoutubeDL(info_opts) as ydl:
