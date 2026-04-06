@@ -1,14 +1,105 @@
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 import yt_dlp
-import os, uuid, threading, time, re
-import requests as http_requests
+import os, uuid, threading, time, re, sqlite3, logging
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
 
 DOWNLOAD_DIR = '/tmp/grabha'
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# ── Activity logging setup ────────────────────────────────────────────────────
+LOG_DIR  = os.path.expanduser('~/grabha/logs')
+LOG_FILE = os.path.join(LOG_DIR, 'activity.log')
+DB_FILE  = os.path.join(LOG_DIR, 'activity.db')
+os.makedirs(LOG_DIR, exist_ok=True)
+
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format='%(message)s',
+)
+_db_lock = threading.Lock()
+
+
+def _init_db():
+    with sqlite3.connect(DB_FILE) as con:
+        con.execute('''
+            CREATE TABLE IF NOT EXISTS downloads (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp  TEXT,
+                ip_address TEXT,
+                url        TEXT,
+                platform   TEXT,
+                format     TEXT,
+                quality    TEXT,
+                title      TEXT,
+                status     TEXT,
+                error_msg  TEXT,
+                device     TEXT
+            )
+        ''')
+        con.commit()
+
+_init_db()
+
+
+def _detect_device(ua: str) -> str:
+    ua = (ua or '').lower()
+    if any(k in ua for k in ('mobile', 'android', 'iphone', 'ipad', 'tablet')):
+        return 'Mobile'
+    return 'Desktop'
+
+
+def _get_ip() -> str:
+    forwarded = request.headers.get('X-Forwarded-For', '')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.remote_addr or '0.0.0.0'
+
+
+def log_attempt(url: str, fmt: str, quality: str, ip: str, device: str) -> int:
+    """Insert a pending download record; return the row id."""
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with _db_lock:
+        with sqlite3.connect(DB_FILE) as con:
+            cur = con.execute(
+                '''INSERT INTO downloads
+                   (timestamp, ip_address, url, format, quality, status, device)
+                   VALUES (?, ?, ?, ?, ?, 'pending', ?)''',
+                (ts, ip, url, fmt, quality, device),
+            )
+            con.commit()
+            return cur.lastrowid
+
+
+def update_log_record(row_id: int, title: str, platform: str, status: str, error_msg: str = ''):
+    """Update the row once the download finishes or fails, and write to log file."""
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with _db_lock:
+        with sqlite3.connect(DB_FILE) as con:
+            con.execute(
+                '''UPDATE downloads
+                   SET title=?, platform=?, status=?, error_msg=?, timestamp=?
+                   WHERE id=?''',
+                (title, platform, status, error_msg, ts, row_id),
+            )
+            row = con.execute(
+                'SELECT ip_address, format, quality FROM downloads WHERE id=?',
+                (row_id,),
+            ).fetchone()
+            con.commit()
+
+    if row:
+        ip, fmt, quality = row
+        logging.info(
+            '%s | IP: %s | Platform: %s | Format: %s | Quality: %s | Status: %s | Title: %s',
+            ts, ip, platform, fmt, quality, status, title,
+        )
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 # In-memory job store
 jobs = {}
@@ -58,6 +149,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
     jobs[job_id]['status'] = 'downloading'
     output_path = os.path.join(DOWNLOAD_DIR, job_id)
     os.makedirs(output_path, exist_ok=True)
+    log_id = jobs[job_id].get('log_id')
 
     # Log clip info if set
     if clip_start or clip_end:
@@ -118,7 +210,8 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            title = info.get('title', 'video')
+            title    = info.get('title', 'video')
+            platform = info.get('extractor_key', 'Unknown')
             jobs[job_id]['title'] = title
             jobs[job_id]['log'].append(f'[info] title: {title}')
 
@@ -130,14 +223,20 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             jobs[job_id]['filename'] = files[0]
             jobs[job_id]['log'].append(f'[done] ready: {files[0]}')
             cleanup_file(file_path, 300)
+            if log_id:
+                update_log_record(log_id, title, platform, 'success')
         else:
             jobs[job_id]['status'] = 'error'
             jobs[job_id]['error']  = 'No output file produced'
+            if log_id:
+                update_log_record(log_id, '', platform, 'error', 'No output file produced')
 
     except Exception as e:
         jobs[job_id]['status'] = 'error'
         jobs[job_id]['error']  = str(e)
         jobs[job_id]['log'].append(f'[error] {e}')
+        if log_id:
+            update_log_record(log_id, '', 'Unknown', 'error', str(e))
 
 
 @app.route('/api/info', methods=['POST'])
@@ -171,12 +270,17 @@ def start_download():
     if not url:
         return jsonify({'error': 'No URL'}), 400
 
+    ip     = _get_ip()
+    device = _detect_device(request.headers.get('User-Agent', ''))
+    log_id = log_attempt(url, fmt, quality, ip, device)
+
     job_id = str(uuid.uuid4())
     jobs[job_id] = {
         'status':          'queued',
         'log':             ['[queue] job created', f'[queue] url: {url}'],
         'progress':        '0%',
         'progress_detail': {},
+        'log_id':          log_id,
     }
 
     t = threading.Thread(target=run_download, args=(job_id, url, fmt, quality, clip_start, clip_end))
