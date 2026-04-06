@@ -38,12 +38,49 @@ def _init_db():
                 title      TEXT,
                 status     TEXT,
                 error_msg  TEXT,
-                device     TEXT
+                device     TEXT,
+                country    TEXT,
+                city       TEXT,
+                isp        TEXT
             )
         ''')
+        # Migrate existing databases that predate the geo columns
+        for col in ('country', 'city', 'isp'):
+            try:
+                con.execute(f'ALTER TABLE downloads ADD COLUMN {col} TEXT')
+            except sqlite3.OperationalError:
+                pass
         con.commit()
 
 _init_db()
+
+
+def get_country(ip: str):
+    """Return (country, city, isp) for a public IP. Returns ('Local','','') for private IPs."""
+    private_prefixes = ('127.', '10.', '192.168.', '::1', 'localhost')
+    if not ip or any(ip.startswith(p) for p in private_prefixes) or ip.startswith('172.'):
+        return 'Local', '', ''
+    try:
+        res = http_requests.get(
+            f'http://ip-api.com/json/{ip}?fields=country,city,isp',
+            timeout=3,
+        )
+        data = res.json()
+        return data.get('country', 'Unknown'), data.get('city', ''), data.get('isp', '')
+    except Exception:
+        return 'Unknown', '', ''
+
+
+def _geo_update(row_id: int, ip: str):
+    """Resolve geo info in background and update the DB record."""
+    country, city, isp = get_country(ip)
+    with _db_lock:
+        with sqlite3.connect(DB_FILE) as con:
+            con.execute(
+                'UPDATE downloads SET country=?, city=?, isp=? WHERE id=?',
+                (country, city, isp, row_id),
+            )
+            con.commit()
 
 
 def _detect_device(ua: str) -> str:
@@ -61,7 +98,7 @@ def _get_ip() -> str:
 
 
 def log_attempt(url: str, fmt: str, quality: str, ip: str, device: str) -> int:
-    """Insert a pending download record; return the row id."""
+    """Insert a pending download record; return the row id. Geo lookup runs async."""
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with _db_lock:
         with sqlite3.connect(DB_FILE) as con:
@@ -72,7 +109,9 @@ def log_attempt(url: str, fmt: str, quality: str, ip: str, device: str) -> int:
                 (ts, ip, url, fmt, quality, device),
             )
             con.commit()
-            return cur.lastrowid
+            row_id = cur.lastrowid
+    threading.Thread(target=_geo_update, args=(row_id, ip), daemon=True).start()
+    return row_id
 
 
 def update_log_record(row_id: int, title: str, platform: str, status: str, error_msg: str = ''):
@@ -87,16 +126,21 @@ def update_log_record(row_id: int, title: str, platform: str, status: str, error
                 (title, platform, status, error_msg, ts, row_id),
             )
             row = con.execute(
-                'SELECT ip_address, format, quality FROM downloads WHERE id=?',
+                'SELECT format, country, city, isp FROM downloads WHERE id=?',
                 (row_id,),
             ).fetchone()
             con.commit()
 
     if row:
-        ip, fmt, quality = row
+        fmt, country, city, isp = row
+        location = country or 'Unknown'
+        if city:
+            location = f'{country}, {city}'
+        if isp:
+            location = f'{location} ({isp})'
         logging.info(
-            '%s | IP: %s | Platform: %s | Format: %s | Quality: %s | Status: %s | Title: %s',
-            ts, ip, platform, fmt, quality, status, title,
+            '%s | %s | %s | %s | %s | %s',
+            ts, location, platform, fmt, status, title,
         )
 
 # ─────────────────────────────────────────────────────────────────────────────
