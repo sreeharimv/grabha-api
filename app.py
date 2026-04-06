@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 import yt_dlp
-import os, uuid, threading, time, re, sqlite3, logging
+import os, uuid, threading, time, re, sqlite3, logging, urllib.request, json
 from datetime import datetime
 
 app = Flask(__name__)
@@ -55,34 +55,6 @@ def _init_db():
 _init_db()
 
 
-def get_country(ip: str):
-    """Return (country, city, isp) for a public IP. Returns ('Local','','') for private IPs."""
-    private_prefixes = ('127.', '10.', '192.168.', '::1', 'localhost')
-    if not ip or any(ip.startswith(p) for p in private_prefixes) or ip.startswith('172.'):
-        return 'Local', '', ''
-    try:
-        res = http_requests.get(
-            f'http://ip-api.com/json/{ip}?fields=country,city,isp',
-            timeout=3,
-        )
-        data = res.json()
-        return data.get('country', 'Unknown'), data.get('city', ''), data.get('isp', '')
-    except Exception:
-        return 'Unknown', '', ''
-
-
-def _geo_update(row_id: int, ip: str):
-    """Resolve geo info in background and update the DB record."""
-    country, city, isp = get_country(ip)
-    with _db_lock:
-        with sqlite3.connect(DB_FILE) as con:
-            con.execute(
-                'UPDATE downloads SET country=?, city=?, isp=? WHERE id=?',
-                (country, city, isp, row_id),
-            )
-            con.commit()
-
-
 def _detect_device(ua: str) -> str:
     ua = (ua or '').lower()
     if any(k in ua for k in ('mobile', 'android', 'iphone', 'ipad', 'tablet')):
@@ -97,21 +69,35 @@ def _get_ip() -> str:
     return request.remote_addr or '0.0.0.0'
 
 
+def _geo_lookup(ip: str) -> tuple:
+    """Return (country, city, isp) for the given IP, or empty strings on failure."""
+    if not ip or ip in ('127.0.0.1', '0.0.0.0'):
+        return '', '', ''
+    try:
+        with urllib.request.urlopen(f'https://ipinfo.io/{ip}/json', timeout=3) as r:
+            data = json.loads(r.read())
+        country = data.get('country', '')
+        city    = data.get('city', '')
+        isp     = data.get('org', '')
+        return country, city, isp
+    except Exception:
+        return '', '', ''
+
+
 def log_attempt(url: str, fmt: str, quality: str, ip: str, device: str) -> int:
-    """Insert a pending download record; return the row id. Geo lookup runs async."""
+    """Insert a pending download record; return the row id."""
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    country, city, isp = _geo_lookup(ip)
     with _db_lock:
         with sqlite3.connect(DB_FILE) as con:
             cur = con.execute(
                 '''INSERT INTO downloads
-                   (timestamp, ip_address, url, format, quality, status, device)
-                   VALUES (?, ?, ?, ?, ?, 'pending', ?)''',
-                (ts, ip, url, fmt, quality, device),
+                   (timestamp, ip_address, url, format, quality, status, device, country, city, isp)
+                   VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)''',
+                (ts, ip, url, fmt, quality, device, country, city, isp),
             )
             con.commit()
-            row_id = cur.lastrowid
-    threading.Thread(target=_geo_update, args=(row_id, ip), daemon=True).start()
-    return row_id
+            return cur.lastrowid
 
 
 def update_log_record(row_id: int, title: str, platform: str, status: str, error_msg: str = ''):
@@ -126,21 +112,16 @@ def update_log_record(row_id: int, title: str, platform: str, status: str, error
                 (title, platform, status, error_msg, ts, row_id),
             )
             row = con.execute(
-                'SELECT format, country, city, isp FROM downloads WHERE id=?',
+                'SELECT ip_address, country, city FROM downloads WHERE id=?',
                 (row_id,),
             ).fetchone()
             con.commit()
 
     if row:
-        fmt, country, city, isp = row
-        location = country or 'Unknown'
-        if city:
-            location = f'{country}, {city}'
-        if isp:
-            location = f'{location} ({isp})'
+        ip, country, city = row
         logging.info(
-            '%s | %s | %s | %s | %s | %s',
-            ts, location, platform, fmt, status, title,
+            '%s | IP: %s | Country: %s | City: %s | Status: %s',
+            ts, ip, country or '', city or '', status,
         )
 
 # ─────────────────────────────────────────────────────────────────────────────
