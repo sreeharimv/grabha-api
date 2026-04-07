@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 import yt_dlp
-import os, uuid, threading, time, re, sqlite3, logging, urllib.request, json
+import os, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib
 from datetime import datetime
 
 app = Flask(__name__)
@@ -357,6 +357,230 @@ def proxy_thumb():
 @app.route('/health')
 def health():
     return jsonify({'status': 'ok', 'service': 'grabha'})
+
+
+@app.route('/admin')
+def admin():
+    page     = max(1, int(request.args.get('page', 1)))
+    per_page = 20
+    offset   = (page - 1) * per_page
+    search   = request.args.get('q', '').strip()
+    status_f = request.args.get('status', '').strip()
+
+    with sqlite3.connect(DB_FILE) as con:
+        con.row_factory = sqlite3.Row
+
+        where_clauses, params = [], []
+        if search:
+            where_clauses.append("(ip_address LIKE ? OR country LIKE ? OR city LIKE ? OR title LIKE ? OR platform LIKE ?)")
+            params.extend([f'%{search}%'] * 5)
+        if status_f:
+            where_clauses.append("status = ?")
+            params.append(status_f)
+
+        where = ('WHERE ' + ' AND '.join(where_clauses)) if where_clauses else ''
+
+        total = con.execute(f'SELECT COUNT(*) FROM downloads {where}', params).fetchone()[0]
+        rows  = con.execute(
+            f'SELECT * FROM downloads {where} ORDER BY id DESC LIMIT ? OFFSET ?',
+            params + [per_page, offset]
+        ).fetchall()
+
+        stats = con.execute(
+            "SELECT COUNT(*) total, "
+            "SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) success, "
+            "SUM(CASE WHEN status='error'   THEN 1 ELSE 0 END) errors, "
+            "SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending "
+            "FROM downloads"
+        ).fetchone()
+
+        top_countries = con.execute(
+            "SELECT country, COUNT(*) n FROM downloads WHERE status='success' AND country != '' "
+            "GROUP BY country ORDER BY n DESC LIMIT 5"
+        ).fetchall()
+
+        top_platforms = con.execute(
+            "SELECT platform, COUNT(*) n FROM downloads WHERE status='success' AND platform != '' "
+            "GROUP BY platform ORDER BY n DESC LIMIT 5"
+        ).fetchall()
+
+    pages      = max(1, (total + per_page - 1) // per_page)
+    rows_dicts = [dict(r) for r in rows]
+    q_str      = f'&q={search}' if search else ''
+    q_str     += f'&status={status_f}' if status_f else ''
+
+    def page_link(p):
+        return f'/admin?page={p}{q_str}'
+
+    html_rows = ''
+    for r in rows_dicts:
+        st = r['status'] or ''
+        badge = {'success': '#2d6a4f', 'error': '#9b2226', 'pending': '#6c757d'}.get(st, '#555')
+        html_rows += f'''<tr>
+            <td>{r["id"]}</td>
+            <td>{r["timestamp"] or ""}</td>
+            <td>{r["ip_address"] or ""}</td>
+            <td>{r["country"] or ""}</td>
+            <td>{r["city"] or ""}</td>
+            <td>{r["platform"] or ""}</td>
+            <td>{r["format"] or ""}</td>
+            <td>{r["quality"] or ""}</td>
+            <td>{r["device"] or ""}</td>
+            <td><span style="background:{badge};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px">{st}</span></td>
+            <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{r["title"] or ""}">{r["title"] or ""}</td>
+            <td style="color:#e07b00;font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{r["error_msg"] or ""}">{r["error_msg"] or ""}</td>
+        </tr>'''
+
+    stat_cards = ''.join(f'''
+        <div style="background:#1e1e1e;border:1px solid #333;border-radius:8px;padding:16px 24px;text-align:center">
+            <div style="font-size:28px;font-weight:700;color:{c}">{v}</div>
+            <div style="color:#888;font-size:13px;margin-top:4px">{l}</div>
+        </div>''' for l, v, c in [
+        ('Total', stats['total'], '#ccc'),
+        ('Success', stats['success'], '#52b788'),
+        ('Errors', stats['errors'], '#e63946'),
+        ('Pending', stats['pending'], '#aaa'),
+    ])
+
+    country_rows = ''.join(f'<tr><td>{r["country"]}</td><td style="color:#52b788">{r["n"]}</td></tr>' for r in top_countries)
+    platform_rows = ''.join(f'<tr><td>{r["platform"]}</td><td style="color:#52b788">{r["n"]}</td></tr>' for r in top_platforms)
+
+    pagination = ''
+    if pages > 1:
+        if page > 1:
+            pagination += f'<a href="{page_link(page-1)}" style="margin:0 4px;color:#aaa;text-decoration:none">← Prev</a>'
+        pagination += f'<span style="margin:0 8px;color:#555">Page {page} of {pages}</span>'
+        if page < pages:
+            pagination += f'<a href="{page_link(page+1)}" style="margin:0 4px;color:#aaa;text-decoration:none">Next →</a>'
+
+    return f'''<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Grabha — Logs</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0 }}
+  body {{ background: #121212; color: #ccc; font-family: "JetBrains Mono", monospace, sans-serif; font-size: 13px; padding: 24px }}
+  h1 {{ color: #fff; font-size: 20px; margin-bottom: 20px }}
+  .stat-grid {{ display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 24px }}
+  .side-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px }}
+  .box {{ background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 16px }}
+  .box h3 {{ color: #888; font-size: 12px; text-transform: uppercase; margin-bottom: 12px }}
+  table {{ width: 100%; border-collapse: collapse }}
+  th {{ color: #555; font-size: 11px; text-transform: uppercase; text-align: left; padding: 6px 10px; border-bottom: 1px solid #2a2a2a }}
+  td {{ padding: 7px 10px; border-bottom: 1px solid #1e1e1e; vertical-align: middle }}
+  tr:hover td {{ background: #1a1a1a }}
+  .toolbar {{ display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap }}
+  input, select {{ background: #1e1e1e; border: 1px solid #333; color: #ccc; padding: 7px 12px; border-radius: 6px; font-size: 13px; outline: none }}
+  input:focus, select:focus {{ border-color: #555 }}
+  button {{ background: #2a2a2a; border: 1px solid #444; color: #ccc; padding: 7px 16px; border-radius: 6px; cursor: pointer; font-size: 13px }}
+  button:hover {{ background: #333 }}
+  .pager {{ text-align: center; margin-top: 16px; color: #555 }}
+  @media(max-width:700px) {{ .stat-grid {{ grid-template-columns: repeat(2,1fr) }} .side-grid {{ grid-template-columns: 1fr }} }}
+</style>
+</head><body>
+<h1>⌗ Grabha — Activity Logs</h1>
+<div class="stat-grid">{stat_cards}</div>
+<div class="side-grid">
+  <div class="box"><h3>Top Countries</h3><table><tbody>{country_rows}</tbody></table></div>
+  <div class="box"><h3>Top Platforms</h3><table><tbody>{platform_rows}</tbody></table></div>
+</div>
+<form method="get" action="/admin">
+  <div class="toolbar">
+    <input name="q" placeholder="Search IP, country, city, title…" value="{search}" style="flex:1;min-width:200px">
+    <select name="status">
+      <option value="">All statuses</option>
+      {''.join(f'<option value="{s}"{"selected" if status_f==s else ""}>{s.capitalize()}</option>' for s in ["success","error","pending"])}
+    </select>
+    <button type="submit">Filter</button>
+    <a href="/admin" style="padding:7px 16px;background:#1e1e1e;border:1px solid #333;border-radius:6px;color:#888;text-decoration:none">Reset</a>
+  </div>
+</form>
+<div class="box" style="overflow-x:auto">
+  <table>
+    <thead><tr>
+      <th>#</th><th>Timestamp</th><th>IP</th><th>Country</th><th>City</th>
+      <th>Platform</th><th>Format</th><th>Quality</th><th>Device</th><th>Status</th><th>Title</th><th>Error</th>
+    </tr></thead>
+    <tbody>{html_rows}</tbody>
+  </table>
+  <div class="pager">{pagination}</div>
+</div>
+</body></html>'''
+
+
+_ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'grabha!@#')
+_TOKEN_SECRET   = os.environ.get('TOKEN_SECRET', 'grabha-token-secret-key')
+
+def _make_token():
+    raw = f'{_TOKEN_SECRET}:{datetime.now().date().isoformat()}'
+    return hmac.new(_TOKEN_SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()
+
+def _valid_token(token):
+    return hmac.compare_digest(token or '', _make_token())
+
+
+@app.route('/admin/login', methods=['POST'])
+def admin_login():
+    data = request.json or {}
+    if data.get('password') == _ADMIN_PASSWORD:
+        return jsonify({'token': _make_token()})
+    return jsonify({'error': 'Invalid password'}), 401
+
+
+@app.route('/admin/data')
+def admin_data():
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not _valid_token(token):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    page     = max(1, int(request.args.get('page', 1)))
+    per_page = 20
+    offset   = (page - 1) * per_page
+    search   = request.args.get('q', '').strip()
+    status_f = request.args.get('status', '').strip()
+
+    with sqlite3.connect(DB_FILE) as con:
+        con.row_factory = sqlite3.Row
+
+        where_clauses, params = [], []
+        if search:
+            where_clauses.append("(ip_address LIKE ? OR country LIKE ? OR city LIKE ? OR title LIKE ? OR platform LIKE ?)")
+            params.extend([f'%{search}%'] * 5)
+        if status_f:
+            where_clauses.append("status = ?")
+            params.append(status_f)
+        where = ('WHERE ' + ' AND '.join(where_clauses)) if where_clauses else ''
+
+        total = con.execute(f'SELECT COUNT(*) FROM downloads {where}', params).fetchone()[0]
+        rows  = con.execute(
+            f'SELECT id, timestamp, ip_address, country, city, platform, format, quality, device, status, title, error_msg '
+            f'FROM downloads {where} ORDER BY id DESC LIMIT ? OFFSET ?',
+            params + [per_page, offset]
+        ).fetchall()
+        stats = con.execute(
+            "SELECT COUNT(*) total, "
+            "SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) success, "
+            "SUM(CASE WHEN status='error'   THEN 1 ELSE 0 END) errors, "
+            "SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending "
+            "FROM downloads"
+        ).fetchone()
+        top_countries = con.execute(
+            "SELECT country, COUNT(*) n FROM downloads WHERE status='success' AND country != '' "
+            "GROUP BY country ORDER BY n DESC LIMIT 5"
+        ).fetchall()
+        top_platforms = con.execute(
+            "SELECT platform, COUNT(*) n FROM downloads WHERE status='success' AND platform != '' "
+            "GROUP BY platform ORDER BY n DESC LIMIT 5"
+        ).fetchall()
+
+    return jsonify({
+        'rows':          [dict(r) for r in rows],
+        'total':         total,
+        'pages':         max(1, (total + per_page - 1) // per_page),
+        'page':          page,
+        'stats':         dict(stats),
+        'top_countries': [dict(r) for r in top_countries],
+        'top_platforms': [dict(r) for r in top_platforms],
+    })
 
 
 if __name__ == '__main__':
