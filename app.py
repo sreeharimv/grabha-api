@@ -347,9 +347,10 @@ def proxy_thumb():
     if not url:
         return jsonify({'error': 'No URL'}), 400
     try:
-        r = http_requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10, stream=True)
-        content_type = r.headers.get('Content-Type', 'image/jpeg')
-        return Response(r.content, content_type=content_type)
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            content_type = r.headers.get('Content-Type', 'image/jpeg')
+            return Response(r.read(), content_type=content_type)
     except Exception as e:
         return jsonify({'error': str(e)}), 502
 
