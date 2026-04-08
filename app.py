@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 import yt_dlp
-import os, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib
+import os, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib, shutil
 from datetime import datetime
 
 app = Flask(__name__)
@@ -183,6 +183,8 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
         jobs[job_id]['log'].append(f'[info] clip section: {s} → {e}')
 
     def progress_hook(d):
+        if jobs[job_id].get('cancelled'):
+            raise yt_dlp.utils.DownloadCancelled('Cancelled by user')
         if d['status'] == 'downloading':
             pct   = d.get('_percent_str', '').strip()
             speed = d.get('_speed_str', '').strip()
@@ -255,6 +257,15 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             jobs[job_id]['error']  = 'No output file produced'
             if log_id:
                 update_log_record(log_id, '', platform, 'error', 'No output file produced')
+
+    except yt_dlp.utils.DownloadCancelled:
+        jobs[job_id]['status'] = 'cancelled'
+        jobs[job_id]['log'].append('[cancelled] download cancelled by user')
+        if log_id:
+            update_log_record(log_id, '', 'Unknown', 'cancelled', 'Cancelled by user')
+        # Clean up partial files
+        if os.path.isdir(output_path):
+            shutil.rmtree(output_path, ignore_errors=True)
 
     except Exception as e:
         jobs[job_id]['status'] = 'error'
@@ -339,6 +350,17 @@ def download_file(job_id):
     if j['status'] != 'done':
         return jsonify({'error': 'File not ready'}), 400
     return send_file(j['file'], as_attachment=True, download_name=j['filename'])
+
+
+@app.route('/api/cancel/<job_id>', methods=['POST'])
+def cancel_job(job_id):
+    if job_id not in jobs:
+        return jsonify({'error': 'Job not found'}), 404
+    j = jobs[job_id]
+    if j['status'] in ('done', 'error', 'cancelled'):
+        return jsonify({'status': j['status'], 'message': 'Job already finished'})
+    j['cancelled'] = True
+    return jsonify({'status': 'cancelling', 'message': 'Cancel signal sent'})
 
 
 @app.route('/api/proxy-thumb')
