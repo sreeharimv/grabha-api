@@ -9,9 +9,12 @@ services:
       - "5000:5000"
     volumes:
       # app.py writes logs to ~/grabha/logs which is /root/grabha/logs inside the container
-      - ./logs:/root/grabha/logs
+      - grabha-logs:/root/grabha/logs
     environment:
       - PORT=5000
       # Optional overrides — set these in a .env file on the server if needed:
       # - ADMIN_PASSWORD=your-password
       # - TOKEN_SECRET=your-secret
+
+volumes:
+  grabha-logs:

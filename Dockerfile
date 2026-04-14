@@ -7,6 +7,9 @@ RUN apt-get update \
 
 WORKDIR /app
 
+# app.py writes logs to ~/grabha/logs which resolves to /root/grabha/logs
+RUN mkdir -p /root/grabha/logs
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
