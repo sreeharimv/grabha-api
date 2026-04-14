@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   grabha-api:
-    build: .
+    image: sreeh007/grabha-api:latest
     container_name: grabha-api
     restart: always
     ports:
