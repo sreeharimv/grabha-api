@@ -7,6 +7,19 @@ from datetime import datetime
 app = Flask(__name__)
 CORS(app)
 
+
+def get_cookiefile(url: str):
+    """Return appropriate cookies file based on URL domain."""
+    cookie_map = {
+        'instagram.com': '/app/cookies/instagram.txt',
+        'youtube.com':   '/app/cookies/youtube.txt',
+        'youtu.be':      '/app/cookies/youtube.txt',
+    }
+    for domain, path in cookie_map.items():
+        if domain in url and os.path.exists(path):
+            return path
+    return None
+
 DOWNLOAD_DIR = '/tmp/grabha'
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
@@ -204,6 +217,8 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
         '360':  'bestvideo[height<=360]+bestaudio/best[height<=360]/best',
     }
 
+    cookiefile = get_cookiefile(url)
+
     if format_type == 'mp3':
         ydl_opts = {
             'format': 'bestaudio/best',
@@ -216,6 +231,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             'progress_hooks': [progress_hook],
             'quiet': True,
             'no_warnings': True,
+            'cookiefile': cookiefile,
         }
     else:
         ydl_opts = {
@@ -225,6 +241,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             'progress_hooks': [progress_hook],
             'quiet': True,
             'no_warnings': True,
+            'cookiefile': cookiefile,
         }
 
     # Apply clip section if provided
@@ -281,7 +298,7 @@ def get_info():
     if not url:
         return jsonify({'error': 'No URL'}), 400
     try:
-        with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
+        with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True, 'cookiefile': get_cookiefile(url)}) as ydl:
             info = ydl.extract_info(url, download=False)
         return jsonify({
             'title':     info.get('title', 'Unknown'),

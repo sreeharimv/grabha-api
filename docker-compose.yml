@@ -10,6 +10,8 @@ services:
     volumes:
       # app.py writes logs to ~/grabha/logs which is /root/grabha/logs inside the container
       - grabha-logs:/root/grabha/logs
+      # cookies are managed on the host and mounted read-only into the container
+      - /home/sreeh007/grabha-cookies:/app/cookies:ro
     environment:
       - PORT=5000
       # Optional overrides — set these in a .env file on the server if needed:
