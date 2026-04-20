@@ -1,0 +1,130 @@
+2026-04-14 14:17:50,518 INFO starting cookie refresh
+2026-04-14 14:17:50,563 ERROR cookie refresh failed: [WinError 32] The process cannot access the file because it is being used by another process
+Traceback (most recent call last):
+  File "\\wsl$\Ubuntu\home\sreeh007\wslprojects\grabha\tools\refresh_cookies.py", line 122, in main
+    cookie_text = export_instagram_cookies(key)
+  File "\\wsl$\Ubuntu\home\sreeh007\wslprojects\grabha\tools\refresh_cookies.py", line 75, in export_instagram_cookies
+    shutil.copy2(CHROME_COOKIES, tmp)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\shutil.py", line 453, in copy2
+    _winapi.CopyFile2(src_, dst_, flags)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process
+2026-04-14 14:18:27,802 INFO starting cookie refresh
+2026-04-14 14:18:27,845 INFO extracted 0 Instagram cookies from Chrome
+2026-04-14 14:18:27,847 WARNING no Instagram cookies found — are you logged in to Instagram in Chrome?
+2026-04-14 14:21:38,750 INFO starting cookie refresh
+2026-04-14 14:21:43,162 ERROR cookie refresh failed: This operation requires admin. Please run as admin.
+Traceback (most recent call last):
+  File "\\wsl$\Ubuntu\home\sreeh007\wslprojects\grabha\tools\refresh_cookies.py", line 80, in main
+    cookie_text, count = export_instagram_cookies()
+                         ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "\\wsl$\Ubuntu\home\sreeh007\wslprojects\grabha\tools\refresh_cookies.py", line 40, in export_instagram_cookies
+    cj = browser_cookie3.chrome(domain_name='.instagram.com')
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\browser_cookie3\__init__.py", line 1320, in chrome
+    return Chrome(cookie_file, domain_name, key_file).load()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\browser_cookie3\__init__.py", line 518, in load
+    with _DatabaseConnetion(self.cookie_file) as con:
+         ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\browser_cookie3\__init__.py", line 364, in __enter__
+    return self.get_connection()
+           ~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\browser_cookie3\__init__.py", line 412, in get_connection
+    con = method()
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\browser_cookie3\__init__.py", line 403, in __get_connection_shadowcopy
+    shadowcopy.shadow_copy(self.__database_file, self.__temp_cookie_file)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\shadowcopy\shadow.py", line 46, in shadow_copy
+    raise RequiresAdminError("This operation requires admin. Please run as admin.")
+shadowcopy.exceptions.RequiresAdminError: This operation requires admin. Please run as admin.
+2026-04-14 14:23:04,253 INFO starting cookie refresh
+2026-04-14 14:23:14,353 ERROR cookie refresh failed: Unable to get key for cookie decryption
+Traceback (most recent call last):
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\browser_cookie3\__init__.py", line 596, in _decrypt
+    return self._decrypt_windows_chromium(value, encrypted_value)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\browser_cookie3\__init__.py", line 587, in _decrypt_windows_chromium
+    _, data = _crypt_unprotect_data(encrypted_value)
+              ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\browser_cookie3\__init__.py", line 99, in _crypt_unprotect_data
+    raise RuntimeError('Failed to decrypt the cipher text with DPAPI')
+RuntimeError: Failed to decrypt the cipher text with DPAPI
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\browser_cookie3\__init__.py", line 612, in _decrypt
+    data = aes.decrypt_and_verify(encrypted_value[12:-16], tag)
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\Cryptodome\Cipher\_mode_gcm.py", line 567, in decrypt_and_verify
+    self.verify(received_mac_tag)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\Cryptodome\Cipher\_mode_gcm.py", line 508, in verify
+    raise ValueError("MAC check failed")
+ValueError: MAC check failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "\\wsl$\Ubuntu\home\sreeh007\wslprojects\grabha\tools\refresh_cookies.py", line 80, in main
+    cookie_text, count = export_instagram_cookies()
+                         ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "\\wsl$\Ubuntu\home\sreeh007\wslprojects\grabha\tools\refresh_cookies.py", line 40, in export_instagram_cookies
+    cj = browser_cookie3.chrome(domain_name='.instagram.com')
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\browser_cookie3\__init__.py", line 1320, in chrome
+    return Chrome(cookie_file, domain_name, key_file).load()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\browser_cookie3\__init__.py", line 550, in load
+    value = self._decrypt(value, enc_value, has_integrity_check_for_cookie_domain)
+  File "C:\Users\SREEHARI\AppData\Local\Programs\Python\Python313\Lib\site-packages\browser_cookie3\__init__.py", line 614, in _decrypt
+    raise BrowserCookieError(
+        'Unable to get key for cookie decryption')
+browser_cookie3.BrowserCookieError: Unable to get key for cookie decryption
+2026-04-14 14:42:17,401 INFO starting cookie refresh
+2026-04-14 14:42:26,821 INFO extracted 2 Instagram cookies from Firefox
+2026-04-14 14:42:26,851 INFO Connected (version 2.0, client OpenSSH_9.6p1)
+2026-04-14 14:42:26,929 INFO Authentication (publickey) successful!
+2026-04-14 14:42:27,350 INFO [chan 0] Opened sftp connection (server version 3)
+2026-04-14 14:42:27,362 INFO [chan 0] sftp session closed.
+2026-04-14 14:42:37,755 INFO pushed to server and restarted container — done
+2026-04-14 14:43:43,353 INFO starting cookie refresh
+2026-04-14 14:43:57,242 INFO extracted 2 Instagram cookies from Firefox
+2026-04-14 14:43:57,319 INFO Connected (version 2.0, client OpenSSH_9.6p1)
+2026-04-14 14:43:57,421 INFO Authentication (publickey) successful!
+2026-04-14 14:43:57,961 INFO [chan 0] Opened sftp connection (server version 3)
+2026-04-14 14:43:58,033 INFO [chan 0] sftp session closed.
+2026-04-14 14:44:08,435 INFO pushed to server and restarted container — done
+2026-04-14 14:44:47,437 INFO starting cookie refresh
+2026-04-14 14:44:56,653 INFO extracted 2 Instagram cookies from Firefox
+2026-04-14 14:44:56,682 INFO Connected (version 2.0, client OpenSSH_9.6p1)
+2026-04-14 14:44:56,755 INFO Authentication (publickey) successful!
+2026-04-14 14:44:56,989 INFO [chan 0] Opened sftp connection (server version 3)
+2026-04-14 14:44:57,001 INFO [chan 0] sftp session closed.
+2026-04-14 14:45:07,399 INFO pushed to server and restarted container — done
+2026-04-14 14:50:33,744 INFO starting cookie refresh
+2026-04-14 14:50:52,933 INFO extracted 10 Instagram cookies from Firefox
+2026-04-14 14:50:52,972 INFO Connected (version 2.0, client OpenSSH_9.6p1)
+2026-04-14 14:50:53,048 INFO Authentication (publickey) successful!
+2026-04-14 14:50:53,481 INFO [chan 0] Opened sftp connection (server version 3)
+2026-04-14 14:50:53,496 INFO [chan 0] sftp session closed.
+2026-04-14 14:51:03,922 INFO pushed to server and restarted container — done
+2026-04-20 13:47:52,054 INFO starting cookie refresh
+2026-04-20 13:47:58,354 INFO extracted 9 Instagram cookies from Firefox
+2026-04-20 13:47:58,354 ERROR cookie refresh failed: [Errno 2] No such file or directory: 'C:\\Users\\sreehari\\.ssh\\anjaneya_key'
+Traceback (most recent call last):
+  File "/home/sreeh007/wslprojects/grabha/tools/refresh_cookies.py", line 92, in main
+    push_to_server(cookie_text)
+  File "/home/sreeh007/wslprojects/grabha/tools/refresh_cookies.py", line 73, in push_to_server
+    key = paramiko.Ed25519Key.from_private_key_file(SSH_KEY)
+  File "/home/sreeh007/.local/lib/python3.10/site-packages/paramiko/pkey.py", line 431, in from_private_key_file
+    key = cls(filename=filename, password=password)
+  File "/home/sreeh007/.local/lib/python3.10/site-packages/paramiko/ed25519key.py", line 59, in __init__
+    with open(filename, "r") as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\sreehari\\.ssh\\anjaneya_key'
+2026-04-20 13:48:43,828 INFO starting cookie refresh
+2026-04-20 13:48:48,130 INFO extracted 9 Instagram cookies from Firefox
+2026-04-20 13:48:48,270 INFO Connected (version 2.0, client Tailscale)
+2026-04-20 13:48:48,600 INFO Authentication (publickey) successful!
+2026-04-20 13:48:48,779 INFO [chan 0] Opened sftp connection (server version 3)
+2026-04-20 13:48:48,981 INFO [chan 0] sftp session closed.
+2026-04-20 13:48:59,545 INFO pushed to server and restarted container â€” done
