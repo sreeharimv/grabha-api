@@ -306,6 +306,7 @@ def get_info():
             'duration':  info.get('duration', 0),
             'uploader':  info.get('uploader', 'Unknown'),
             'platform':  info.get('extractor_key', 'Unknown'),
+            'chapters':  info.get('chapters', []),
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 400
