@@ -210,11 +210,13 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             jobs[job_id]['log'].append('[download] processing file…')
 
     quality_map = {
-        'best': 'bestvideo+bestaudio/best',
-        '1080': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-        '720':  'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
-        '480':  'bestvideo[height<=480]+bestaudio/best[height<=480]/best',
-        '360':  'bestvideo[height<=360]+bestaudio/best[height<=360]/best',
+        # Prefer pre-muxed mp4 first to avoid blank-video issues on Facebook/Meta
+        # (separate bestvideo+bestaudio merges can produce a blank video track)
+        'best': 'bestvideo+bestaudio/best[ext=mp4]/best',
+        '1080': 'bestvideo[height<=1080]+bestaudio/best[height<=1080][ext=mp4]/best[height<=1080]/best',
+        '720':  'bestvideo[height<=720]+bestaudio/best[height<=720][ext=mp4]/best[height<=720]/best',
+        '480':  'bestvideo[height<=480]+bestaudio/best[height<=480][ext=mp4]/best[height<=480]/best',
+        '360':  'bestvideo[height<=360]+bestaudio/best[height<=360][ext=mp4]/best[height<=360]/best',
     }
 
     cookiefile = get_cookiefile(url)
