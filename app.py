@@ -233,6 +233,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             'progress_hooks': [progress_hook],
             'quiet': True,
             'no_warnings': True,
+            'noplaylist': True,
             'cookiefile': cookiefile,
         }
     else:
@@ -243,6 +244,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             'progress_hooks': [progress_hook],
             'quiet': True,
             'no_warnings': True,
+            'noplaylist': True,
             'cookiefile': cookiefile,
         }
 
