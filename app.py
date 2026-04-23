@@ -65,6 +65,8 @@ def _init_db():
                 pass
         con.commit()
 
+        con.commit()
+
 _init_db()
 
 
@@ -95,6 +97,29 @@ def _geo_lookup(ip: str) -> tuple:
         return country, city, isp
     except Exception:
         return '', '', ''
+
+
+def _backfill_geo():
+    """Backfill city/country for rows inserted before geo columns existed. Runs once at startup."""
+    with _db_lock:
+        with sqlite3.connect(DB_FILE) as con:
+            con.row_factory = sqlite3.Row
+            missing = con.execute(
+                "SELECT id, ip_address FROM downloads "
+                "WHERE ip_address IS NOT NULL AND ip_address != '' "
+                "AND (city IS NULL OR city = '') LIMIT 50"
+            ).fetchall()
+            for row in missing:
+                country, city, isp = _geo_lookup(row['ip_address'])
+                if country or city:
+                    con.execute(
+                        "UPDATE downloads SET country=?, city=?, isp=? WHERE id=?",
+                        (country, city, isp, row['id'])
+                    )
+            if missing:
+                con.commit()
+
+_backfill_geo()
 
 
 def log_attempt(url: str, fmt: str, quality: str, ip: str, device: str) -> int:
@@ -617,7 +642,7 @@ def admin_data():
             "GROUP BY platform ORDER BY n DESC LIMIT 5"
         ).fetchall()
         top_cities = con.execute(
-            "SELECT city, COUNT(*) n FROM downloads WHERE status='success' AND city != '' "
+            "SELECT city, COUNT(*) n FROM downloads WHERE status='success' AND city IS NOT NULL AND city != '' "
             "GROUP BY city ORDER BY n DESC LIMIT 5"
         ).fetchall()
 
