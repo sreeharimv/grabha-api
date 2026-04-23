@@ -616,6 +616,10 @@ def admin_data():
             "SELECT platform, COUNT(*) n FROM downloads WHERE status='success' AND platform != '' "
             "GROUP BY platform ORDER BY n DESC LIMIT 5"
         ).fetchall()
+        top_cities = con.execute(
+            "SELECT city, COUNT(*) n FROM downloads WHERE status='success' AND city != '' "
+            "GROUP BY city ORDER BY n DESC LIMIT 5"
+        ).fetchall()
 
     return jsonify({
         'rows':          [dict(r) for r in rows],
@@ -625,6 +629,7 @@ def admin_data():
         'stats':         dict(stats),
         'top_countries': [dict(r) for r in top_countries],
         'top_platforms': [dict(r) for r in top_platforms],
+        'top_cities':    [dict(r) for r in top_cities],
     })
 
 
