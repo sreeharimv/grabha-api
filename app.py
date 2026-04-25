@@ -249,7 +249,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
     if format_type == 'mp3':
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(output_path, '%(title).180s.%(ext)s'),
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -264,7 +264,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
     else:
         ydl_opts = {
             'format': quality_map.get(quality, 'bestvideo+bestaudio/best'),
-            'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(output_path, '%(title).180s.%(ext)s'),
             'merge_output_format': 'mp4',
             'progress_hooks': [progress_hook],
             'quiet': True,
