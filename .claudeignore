@@ -1,0 +1,14 @@
+.git/**
+__pycache__/**
+*.pyc
+*.pyo
+.venv/**
+venv/**
+*.egg-info/**
+*.log
+*.db
+*.sqlite3
+.env
+.env.*
+cookies.txt
+tools/cookie_refresh.log

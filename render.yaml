@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: grabha-api
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    plan: free
-    envVars:
-      - key: PORT
-        value: 5000
