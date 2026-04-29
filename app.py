@@ -273,6 +273,10 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             'cookiefile': cookiefile,
         }
 
+    # Required for YouTube JS challenge solving (EJS)
+    ydl_opts['js_runtimes'] = {'node': {}}
+    ydl_opts['remote_components'] = {'ejs:github'}
+
     # Apply clip section if provided
     if clip_start or clip_end:
         s = clip_start or '0:00:00'
@@ -327,7 +331,7 @@ def get_info():
     if not url:
         return jsonify({'error': 'No URL'}), 400
     try:
-        with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True, 'cookiefile': get_cookiefile(url)}) as ydl:
+        with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True, 'cookiefile': get_cookiefile(url), 'js_runtimes': {'node': {}}, 'remote_components': {'ejs:github'}}) as ydl:
             info = ydl.extract_info(url, download=False)
         return jsonify({
             'title':     info.get('title', 'Unknown'),
