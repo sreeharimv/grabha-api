@@ -235,13 +235,14 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             jobs[job_id]['log'].append('[download] processing file…')
 
     quality_map = {
-        # Prefer pre-muxed mp4 first to avoid blank-video issues on Facebook/Meta
-        # (separate bestvideo+bestaudio merges can produce a blank video track)
-        'best': 'bestvideo+bestaudio/best[ext=mp4]/best',
-        '1080': 'bestvideo[height<=1080]+bestaudio/best[height<=1080][ext=mp4]/best[height<=1080]/best',
-        '720':  'bestvideo[height<=720]+bestaudio/best[height<=720][ext=mp4]/best[height<=720]/best',
-        '480':  'bestvideo[height<=480]+bestaudio/best[height<=480][ext=mp4]/best[height<=480]/best',
-        '360':  'bestvideo[height<=360]+bestaudio/best[height<=360][ext=mp4]/best[height<=360]/best',
+        # Pre-muxed mp4 first — Instagram/Facebook only serve VP9 DASH streams;
+        # merging them produces a file most players show as audio-only.
+        # Falling back to pre-muxed (unknown codec) mp4 picks the H.264 variant.
+        'best': 'best[ext=mp4]/bestvideo+bestaudio/best',
+        '1080': 'best[ext=mp4][height<=1080]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+        '720':  'best[ext=mp4][height<=720]/bestvideo[height<=720]+bestaudio/best[height<=720]/best',
+        '480':  'best[ext=mp4][height<=480]/bestvideo[height<=480]+bestaudio/best[height<=480]/best',
+        '360':  'best[ext=mp4][height<=360]/bestvideo[height<=360]+bestaudio/best[height<=360]/best',
     }
 
     cookiefile = get_cookiefile(url)
