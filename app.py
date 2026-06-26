@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, Response
+from flask import Flask, request, jsonify, send_file, Response, send_from_directory
 from flask_cors import CORS
 import yt_dlp
 import os, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib, shutil
@@ -427,6 +427,15 @@ def proxy_thumb():
             return Response(r.read(), content_type=content_type)
     except Exception as e:
         return jsonify({'error': str(e)}), 502
+
+
+@app.route("/")
+def index():
+    return send_from_directory("/app/web", "index.html")
+
+@app.route("/<path:filename>")
+def static_files(filename):
+    return send_from_directory("/app/web", filename)
 
 
 @app.route('/health')
