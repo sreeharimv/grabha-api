@@ -442,6 +442,21 @@ def static_files(filename):
     return send_from_directory("/app/web", filename)
 
 
+
+_ADMIN_USER     = os.environ.get('ADMIN_USER', 'grabha_admin')
+_ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'grabha!@#')
+_TOKEN_SECRET   = os.environ.get('TOKEN_SECRET', 'grabha-token-secret-key')
+
+def _make_token():
+    import hmac, hashlib
+    from datetime import datetime
+    raw = f'{_TOKEN_SECRET}:{datetime.now().date().isoformat()}'
+    return hmac.new(_TOKEN_SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()
+
+def _valid_token(token):
+    import hmac
+    return hmac.compare_digest(token or '', _make_token())
+
 @app.route('/health')
 def health():
     return jsonify({'status': 'ok', 'service': 'grabha'})
@@ -451,9 +466,9 @@ def health():
 @app.route('/admin/login', methods=['POST'])
 def admin_login():
     data = request.json or {}
-    if data.get('password') == _ADMIN_PASSWORD:
+    if data.get('username') == _ADMIN_USER and data.get('password') == _ADMIN_PASSWORD:
         return jsonify({'token': _make_token()})
-    return jsonify({'error': 'Invalid password'}), 401
+    return jsonify({'error': 'Invalid credentials'}), 401
 
 
 @app.route('/admin/data')
