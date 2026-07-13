@@ -1,8 +1,12 @@
 FROM python:3.11-slim
 
-# ffmpeg is required by yt-dlp for merging streams and mp3 conversion
+# ffmpeg for merging/mp3; nodejs required by yt-dlp for YouTube JS extraction.
+# yt-dlp requires Node >=22 for its JS challenge solver — Debian's default
+# "nodejs" apt package is v20, which yt-dlp silently treats as unsupported.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg nodejs \
+    && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -234,23 +234,35 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
         elif d['status'] == 'finished':
             jobs[job_id]['log'].append('[download] processing file…')
 
-    quality_map = {
-        # Pre-muxed mp4 first — Instagram/Facebook only serve VP9 DASH streams;
-        # merging them produces a file most players show as audio-only.
-        # Falling back to pre-muxed (unknown codec) mp4 picks the H.264 variant.
-        'best': 'best[ext=mp4]/bestvideo+bestaudio/best',
-        '1080': 'best[ext=mp4][height<=1080]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-        '720':  'best[ext=mp4][height<=720]/bestvideo[height<=720]+bestaudio/best[height<=720]/best',
-        '480':  'best[ext=mp4][height<=480]/bestvideo[height<=480]+bestaudio/best[height<=480]/best',
-        '360':  'best[ext=mp4][height<=360]/bestvideo[height<=360]+bestaudio/best[height<=360]/best',
-    }
+    # Instagram/Facebook only serve VP9 DASH streams; merging them produces a
+    # file most players show as audio-only, so prefer their pre-muxed mp4
+    # (picks the H.264 variant) first. YouTube's pre-muxed mp4 (itag 18) has
+    # no such issue but is sometimes served truncated/throttled regardless of
+    # auth, so for everything else prefer the adaptive bestvideo+bestaudio.
+    if any(d in url for d in ('instagram.com', 'facebook.com', 'fb.watch')):
+        quality_map = {
+            'best': 'best[ext=mp4]/bestvideo+bestaudio/best',
+            '1080': 'best[ext=mp4][height<=1080]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+            '720':  'best[ext=mp4][height<=720]/bestvideo[height<=720]+bestaudio/best[height<=720]/best',
+            '480':  'best[ext=mp4][height<=480]/bestvideo[height<=480]+bestaudio/best[height<=480]/best',
+            '360':  'best[ext=mp4][height<=360]/bestvideo[height<=360]+bestaudio/best[height<=360]/best',
+        }
+    else:
+        quality_map = {
+            'best': 'bestvideo+bestaudio/best[ext=mp4]/best',
+            '1080': 'bestvideo[height<=1080]+bestaudio/best[ext=mp4][height<=1080]/best[height<=1080]',
+            '720':  'bestvideo[height<=720]+bestaudio/best[ext=mp4][height<=720]/best[height<=720]',
+            '480':  'bestvideo[height<=480]+bestaudio/best[ext=mp4][height<=480]/best[height<=480]',
+            '360':  'bestvideo[height<=360]+bestaudio/best[ext=mp4][height<=360]/best[height<=360]',
+        }
 
     cookiefile = get_cookiefile(url)
 
     if format_type == 'mp3':
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': os.path.join(output_path, '%(title).180s.%(ext)s'),
+            'outtmpl': os.path.join(output_path, '%(title).60s.%(ext)s'),
+            'trim_file_name': 200,
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -265,7 +277,8 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
     else:
         ydl_opts = {
             'format': quality_map.get(quality, 'bestvideo+bestaudio/best'),
-            'outtmpl': os.path.join(output_path, '%(title).180s.%(ext)s'),
+            'outtmpl': os.path.join(output_path, '%(title).60s.%(ext)s'),
+            'trim_file_name': 200,
             'merge_output_format': 'mp4',
             'progress_hooks': [progress_hook],
             'quiet': True,
