@@ -301,6 +301,8 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
+            if info is None:
+                raise Exception('Could not extract info — content may be private, expired, or require login')
             title    = info.get('title', 'video')
             platform = info.get('extractor_key', 'Unknown')
             jobs[job_id]['title'] = title
@@ -347,6 +349,8 @@ def get_info():
     try:
         with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True, 'cookiefile': get_cookiefile(url), 'js_runtimes': {'node': {}}, 'remote_components': {'ejs:github'}}) as ydl:
             info = ydl.extract_info(url, download=False)
+        if info is None:
+            raise Exception('Could not extract info — content may be private, expired, or require login')
         return jsonify({
             'title':     info.get('title', 'Unknown'),
             'thumbnail': info.get('thumbnail', ''),
