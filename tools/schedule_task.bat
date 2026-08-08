@@ -4,13 +4,13 @@
 :: Run this from an Administrator Command Prompt
 
 schtasks /create /tn "Grabha Cookie Refresh" ^
-  /tr "wsl python3 /home/sreeh007/wslprojects/grabha/tools/refresh_cookies.py" ^
+  /tr "powershell.exe -WindowStyle Hidden -NonInteractive -Command \"wsl python3 /home/sreeh007/wslprojects/grabha/grabha-api/tools/refresh_cookies.py\"" ^
   /sc daily /mo 3 /st 09:00 ^
   /rl highest /f ^
   /ru "%USERNAME%"
 
 schtasks /create /tn "Grabha Cookie Refresh (Logon)" ^
-  /tr "wsl python3 /home/sreeh007/wslprojects/grabha/tools/refresh_cookies.py" ^
+  /tr "powershell.exe -WindowStyle Hidden -NonInteractive -Command \"wsl python3 /home/sreeh007/wslprojects/grabha/grabha-api/tools/refresh_cookies.py\"" ^
   /sc onlogon ^
   /rl highest /f ^
   /ru "%USERNAME%"
