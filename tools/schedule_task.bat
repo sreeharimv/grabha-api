@@ -1,23 +1,13 @@
 @echo off
-:: Schedules refresh_cookies.py to run every 3 days at 9 AM
-:: Also runs at login so missed runs are caught if machine was off
-:: Run this from an Administrator Command Prompt
+:: Registers the Grabha Cookie Refresh scheduled task (see schedule_task.ps1)
+:: Runs every 3 days at 9 AM, on every logon, and catches up a missed run
+:: automatically (StartWhenAvailable) instead of waiting for the next slot.
+:: Run this from an Administrator Command Prompt.
 
-schtasks /create /tn "Grabha Cookie Refresh" ^
-  /tr "powershell.exe -WindowStyle Hidden -NonInteractive -Command \"wsl python3 /home/sreeh007/wslprojects/grabha/grabha-api/tools/refresh_cookies.py\"" ^
-  /sc daily /mo 3 /st 09:00 ^
-  /rl highest /f ^
-  /ru "%USERNAME%"
-
-schtasks /create /tn "Grabha Cookie Refresh (Logon)" ^
-  /tr "powershell.exe -WindowStyle Hidden -NonInteractive -Command \"wsl python3 /home/sreeh007/wslprojects/grabha/grabha-api/tools/refresh_cookies.py\"" ^
-  /sc onlogon ^
-  /rl highest /f ^
-  /ru "%USERNAME%"
+powershell.exe -ExecutionPolicy Bypass -File "%~dp0schedule_task.ps1"
 
 if %errorlevel% == 0 (
-    echo [grabha] Tasks scheduled successfully.
-    echo [grabha] Runs every 3 days at 9:00 AM + on every login.
+    echo [grabha] Task scheduled successfully.
 ) else (
     echo [grabha] Failed to schedule task. Run as Administrator.
 )
