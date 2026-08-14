@@ -3,6 +3,9 @@ from flask_cors import CORS
 import yt_dlp
 import os, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib, shutil
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo('Asia/Kolkata')
 
 app = Flask(__name__)
 CORS(app)
@@ -131,7 +134,7 @@ _backfill_geo()
 
 def log_attempt(url: str, fmt: str, quality: str, ip: str, device: str) -> int:
     """Insert a pending download record; return the row id."""
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ts = datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')
     country, city, isp = _geo_lookup(ip)
     with _db_lock:
         with sqlite3.connect(DB_FILE) as con:
@@ -147,7 +150,7 @@ def log_attempt(url: str, fmt: str, quality: str, ip: str, device: str) -> int:
 
 def update_log_record(row_id: int, title: str, platform: str, status: str, error_msg: str = ''):
     """Update the row once the download finishes or fails, and write to log file."""
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ts = datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')
     with _db_lock:
         with sqlite3.connect(DB_FILE) as con:
             con.execute(
