@@ -41,7 +41,12 @@ def extract_cookies() -> tuple:
     tmp = tempfile.mktemp(suffix='.txt')
     result = subprocess.run(
         [
-            'yt-dlp',
+            # Invoked via `python3 -m` rather than the bare `yt-dlp` command:
+            # the Task Scheduler action runs this non-interactively through
+            # `wsl python3 ...`, which never sources ~/.bashrc, so PATH
+            # lacks ~/.local/bin (where pip --user installs yt-dlp) even
+            # though it works fine from an interactive shell.
+            sys.executable, '-m', 'yt_dlp',
             '--cookies-from-browser', 'firefox',
             '--cookies', tmp,
             '--skip-download',
