@@ -78,6 +78,13 @@ def _detect_device(ua: str) -> str:
 
 
 def _get_ip() -> str:
+    # CF-Connecting-IP is set by Cloudflare (incl. the tunnel) and is not
+    # client-spoofable, unlike X-Forwarded-For which Cloudflare only
+    # appends to rather than strips — a client can send its own
+    # X-Forwarded-For value and have it land first in the list.
+    cf_ip = request.headers.get('CF-Connecting-IP', '')
+    if cf_ip:
+        return cf_ip.strip()
     forwarded = request.headers.get('X-Forwarded-For', '')
     if forwarded:
         return forwarded.split(',')[0].strip()
