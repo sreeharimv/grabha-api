@@ -5,6 +5,10 @@ on:
     branches:
       - main
   workflow_dispatch:
+  schedule:
+    # Rebuild daily even with no code changes, so yt-dlp>=2025.1.15
+    # picks up the latest release (extractors break often, e.g. HTTP 403s).
+    - cron: '17 3 * * *'
 
 jobs:
   build-and-push:
