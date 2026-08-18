@@ -308,47 +308,63 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
         ydl_opts['download_ranges'] = lambda info, ytdl: [{'start_time': _ts(s), 'end_time': _ts(e)}]
         ydl_opts['force_keyframes_at_cuts'] = True
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            if info is None:
-                raise Exception('Could not extract info — content may be private, expired, or require login')
-            title    = info.get('title', 'video')
-            platform = info.get('extractor_key', 'Unknown')
-            jobs[job_id]['title'] = title
-            jobs[job_id]['log'].append(f'[info] title: {title}')
+    # YouTube's PO-token fetch is occasionally flaky (yt-dlp-ejs/network),
+    # producing a transient "ffmpeg exited with code 8" / HTTP 403 that a
+    # same-URL retry reliably clears. Retry once for that specific pattern
+    # rather than surfacing it to the user; anything else fails immediately.
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if info is None:
+                    raise Exception('Could not extract info — content may be private, expired, or require login')
+                title    = info.get('title', 'video')
+                platform = info.get('extractor_key', 'Unknown')
+                jobs[job_id]['title'] = title
+                jobs[job_id]['log'].append(f'[info] title: {title}')
 
-        files = os.listdir(output_path)
-        if files:
-            file_path = os.path.join(output_path, files[0])
-            jobs[job_id]['status']   = 'done'
-            jobs[job_id]['file']     = file_path
-            jobs[job_id]['filename'] = files[0]
-            jobs[job_id]['log'].append(f'[done] ready: {files[0]}')
-            cleanup_file(file_path, 300)
+            files = os.listdir(output_path)
+            if files:
+                file_path = os.path.join(output_path, files[0])
+                jobs[job_id]['status']   = 'done'
+                jobs[job_id]['file']     = file_path
+                jobs[job_id]['filename'] = files[0]
+                jobs[job_id]['log'].append(f'[done] ready: {files[0]}')
+                cleanup_file(file_path, 300)
+                if log_id:
+                    update_log_record(log_id, title, platform, 'success')
+            else:
+                jobs[job_id]['status'] = 'error'
+                jobs[job_id]['error']  = 'No output file produced'
+                if log_id:
+                    update_log_record(log_id, '', platform, 'error', 'No output file produced')
+            return
+
+        except yt_dlp.utils.DownloadCancelled:
+            jobs[job_id]['status'] = 'cancelled'
+            jobs[job_id]['log'].append('[cancelled] download cancelled by user')
             if log_id:
-                update_log_record(log_id, title, platform, 'success')
-        else:
+                update_log_record(log_id, '', 'Unknown', 'cancelled', 'Cancelled by user')
+            # Clean up partial files
+            if os.path.isdir(output_path):
+                shutil.rmtree(output_path, ignore_errors=True)
+            return
+
+        except Exception as e:
+            transient = 'ffmpeg exited with code' in str(e) or 'HTTP Error 403' in str(e)
+            if transient and attempt < max_attempts:
+                jobs[job_id]['log'].append(f'[retry] transient error, retrying: {e}')
+                shutil.rmtree(output_path, ignore_errors=True)
+                os.makedirs(output_path, exist_ok=True)
+                time.sleep(2)
+                continue
             jobs[job_id]['status'] = 'error'
-            jobs[job_id]['error']  = 'No output file produced'
+            jobs[job_id]['error']  = str(e)
+            jobs[job_id]['log'].append(f'[error] {e}')
             if log_id:
-                update_log_record(log_id, '', platform, 'error', 'No output file produced')
-
-    except yt_dlp.utils.DownloadCancelled:
-        jobs[job_id]['status'] = 'cancelled'
-        jobs[job_id]['log'].append('[cancelled] download cancelled by user')
-        if log_id:
-            update_log_record(log_id, '', 'Unknown', 'cancelled', 'Cancelled by user')
-        # Clean up partial files
-        if os.path.isdir(output_path):
-            shutil.rmtree(output_path, ignore_errors=True)
-
-    except Exception as e:
-        jobs[job_id]['status'] = 'error'
-        jobs[job_id]['error']  = str(e)
-        jobs[job_id]['log'].append(f'[error] {e}')
-        if log_id:
-            update_log_record(log_id, '', 'Unknown', 'error', str(e))
+                update_log_record(log_id, '', 'Unknown', 'error', str(e))
+            return
 
 
 @app.route('/api/info', methods=['POST'])
