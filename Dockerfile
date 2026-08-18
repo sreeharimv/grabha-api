@@ -17,6 +17,13 @@ RUN mkdir -p /root/grabha/logs
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# yt-dlp's stable PyPI releases lag YouTube's PO-token/signature churn by
+# weeks (nightlies ship fixes within a day or two); stale extractors cause
+# intermittent "ffmpeg exited with code 8" / HTTP 403 on YouTube downloads
+# that a fresh nightly resolves. Force-upgrade to the nightly channel here
+# so the daily scheduled image rebuild keeps this current.
+RUN pip install --no-cache-dir --pre -U yt-dlp yt-dlp-ejs
+
 COPY app.py .
 
 EXPOSE 5000
