@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file, Response, send_from_directory
 from flask_cors import CORS
 import yt_dlp
-import os, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib, shutil, signal
+import os, sys, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib, shutil, signal
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -43,6 +43,11 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(message)s',
 )
+# basicConfig points the *root* logger at a file, and werkzeug propagates to
+# root — so every request line and every traceback went to activity.log and
+# `docker logs grabha-api` stayed empty but for the two Flask banner lines.
+# Mirror to stdout so container logs are actually usable for debugging.
+logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 _db_lock = threading.Lock()
 
 
