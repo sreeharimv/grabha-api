@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file, Response, send_from_directory
 from flask_cors import CORS
 import yt_dlp
-import os, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib, shutil
+import os, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib, shutil, signal
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -25,6 +25,12 @@ def get_cookiefile(url: str):
 
 DOWNLOAD_DIR = '/tmp/grabha'
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# Hard ceiling on a single download. Without one a wedged ffmpeg holds its
+# thread forever and leaves its activity row stuck on 'pending' (one such row
+# sat there for four months). 15 min is generous: the slowest legitimate job
+# observed — a clip seek through a 2.5h HLS stream — took 8m25s.
+MAX_JOB_SECONDS = int(os.environ.get('MAX_JOB_SECONDS', 900))
 
 # ── Activity logging setup ────────────────────────────────────────────────────
 LOG_DIR  = os.path.expanduser('~/grabha/logs')
@@ -71,6 +77,29 @@ def _init_db():
         con.commit()
 
 _init_db()
+
+
+def _reconcile_orphaned_jobs():
+    """Fail any row left 'pending' by a previous process.
+
+    The job store is in-memory only, so a restart kills every running worker
+    thread while its row stays 'pending' forever — nothing else will ever
+    close it out. Anything still pending at startup is by definition dead.
+    """
+    with _db_lock:
+        with sqlite3.connect(DB_FILE) as con:
+            cur = con.execute(
+                "UPDATE downloads SET status='error', error_msg=? WHERE status='pending'",
+                ('Interrupted — the server restarted while this download was running',),
+            )
+            con.commit()
+            n = cur.rowcount
+    if n:
+        logging.info('%s | Reconciled %d orphaned pending download(s) at startup',
+                     datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S'), n)
+
+
+_reconcile_orphaned_jobs()
 
 
 def _detect_device(ua: str) -> str:
@@ -192,6 +221,58 @@ def cleanup_file(path, delay=300):
     threading.Thread(target=_cleanup, daemon=True).start()
 
 
+def _kill_job_processes(job_id):
+    """SIGKILL any ffmpeg child still working on this job.
+
+    yt-dlp's progress hook is our only cancellation point, and it is never
+    called while ffmpeg runs as a subprocess — so a wedged ffmpeg can only be
+    stopped from outside. Children are matched on the job_id, which appears in
+    their cmdline via the output path.
+    """
+    killed = 0
+    for pid in os.listdir('/proc'):
+        if not pid.isdigit():
+            continue
+        try:
+            with open('/proc/%s/cmdline' % pid, 'rb') as fh:
+                cmdline = fh.read().decode('utf-8', 'replace')
+        except OSError:
+            continue
+        if job_id in cmdline and 'ffmpeg' in cmdline:
+            try:
+                os.kill(int(pid), signal.SIGKILL)
+                killed += 1
+            except OSError:
+                pass
+    return killed
+
+
+def _start_watchdog(job_id, log_id, timeout=None):
+    """Fail a job that outlives MAX_JOB_SECONDS instead of leaving it hanging."""
+    timeout = timeout or MAX_JOB_SECONDS
+
+    def _watch():
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            time.sleep(5)
+            j = jobs.get(job_id)
+            if not j or j['status'] in ('done', 'error', 'cancelled'):
+                return
+        j = jobs.get(job_id)
+        if not j or j['status'] in ('done', 'error', 'cancelled'):
+            return
+        msg = 'Timed out after %ds' % timeout
+        j['cancelled'] = True
+        j['status']    = 'error'
+        j['error']     = msg
+        j['log'].append('[error] %s — killing download' % msg)
+        _kill_job_processes(job_id)
+        if log_id:
+            update_log_record(log_id, j.get('title', ''), 'Unknown', 'error', msg)
+
+    threading.Thread(target=_watch, daemon=True).start()
+
+
 def parse_progress(line):
     """Extract percent, speed, eta from a yt-dlp progress line."""
     pct   = re.search(r'(\d+\.?\d*)%', line)
@@ -223,6 +304,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
     output_path = os.path.join(DOWNLOAD_DIR, job_id)
     os.makedirs(output_path, exist_ok=True)
     log_id = jobs[job_id].get('log_id')
+    _start_watchdog(job_id, log_id)
 
     # Log clip info if set
     if clip_start or clip_end:
@@ -301,12 +383,24 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
     ydl_opts['js_runtimes'] = {'node': {}}
     ydl_opts['remote_components'] = {'ejs:github'}
 
+    # yt-dlp defaults to no socket timeout, so a stalled read blocks forever.
+    ydl_opts['socket_timeout'] = 30
+
     # Apply clip section if provided
     if clip_start or clip_end:
         s = clip_start or '0:00:00'
         e = clip_end   or 'inf'
         ydl_opts['download_ranges'] = lambda info, ytdl: [{'start_time': _ts(s), 'end_time': _ts(e)}]
         ydl_opts['force_keyframes_at_cuts'] = True
+        # Clipping runs through ffmpeg's -ss, which can only seek cheaply on a
+        # plain HTTPS URL (HTTP range request). On an HLS playlist ffmpeg walks
+        # segments from the start and discards them: a 17s clip at 9:25 into a
+        # 2h35m video read ~150MB and wrote nothing for 8 minutes. YouTube's
+        # "Premium" renditions (e.g. itag 616) are HLS-only and outrank the
+        # equivalent progressive format on codec, so they get picked by
+        # default — sort protocol first, then fall back to the usual quality
+        # ordering, to keep the highest resolution that is actually seekable.
+        ydl_opts['format_sort'] = ['proto', 'res', 'br']
 
     # YouTube's PO-token fetch is occasionally flaky (yt-dlp-ejs/network),
     # producing a transient "ffmpeg exited with code 8" / HTTP 403 that a
@@ -352,7 +446,10 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             return
 
         except Exception as e:
-            transient = 'ffmpeg exited with code' in str(e) or 'HTTP Error 403' in str(e)
+            # A watchdog kill surfaces as "ffmpeg exited with code ..." too;
+            # never retry a job that was deliberately stopped.
+            transient = ('ffmpeg exited with code' in str(e) or 'HTTP Error 403' in str(e)) \
+                and not jobs[job_id].get('cancelled')
             if transient and attempt < max_attempts:
                 jobs[job_id]['log'].append(f'[retry] transient error, retrying: {e}')
                 shutil.rmtree(output_path, ignore_errors=True)
@@ -424,7 +521,18 @@ def start_download():
 @app.route('/api/status/<job_id>')
 def job_status(job_id):
     if job_id not in jobs:
-        return jsonify({'error': 'Job not found'}), 404
+        # The job store is in-memory, so a restart loses every job. Report a
+        # terminal status rather than a bare 404: the frontend poller reads
+        # only the JSON body and would otherwise poll a dead job forever.
+        return jsonify({
+            'status': 'error',
+            'error':  'Job no longer exists — the server restarted. Please try again.',
+            'log':    [],
+            'progress': '0%',
+            'progress_detail': {},
+            'title': '',
+            'filename': '',
+        }), 404
     j = jobs[job_id]
     return jsonify({
         'status':          j['status'],
@@ -476,9 +584,18 @@ def proxy_thumb():
 def index():
     return send_from_directory("/app/web", "index.html")
 
+# The web root is a bind-mounted checkout, so anything that lands in it is
+# served publicly — a stray activity.db there was reachable at /activity.db.
+_BLOCKED_STATIC_EXT = ('.db', '.sqlite', '.sqlite3', '.env', '.log', '.py')
+
+
 @app.route("/<path:filename>")
 def static_files(filename):
     import os as _os
+    parts = filename.split('/')
+    if any(part.startswith('.') for part in parts) or \
+            filename.lower().endswith(_BLOCKED_STATIC_EXT):
+        return jsonify({'error': 'Not found'}), 404
     full = _os.path.join("/app/web", filename)
     if _os.path.isdir(full):
         filename = filename.rstrip("/") + "/index.html"

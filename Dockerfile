@@ -11,6 +11,10 @@ RUN apt-get update \
 
 WORKDIR /app
 
+# Unbuffered stdout, or `docker logs grabha-api` shows nothing but the two
+# Flask banner lines for days and there is no way to see a traceback.
+ENV PYTHONUNBUFFERED=1
+
 # app.py writes logs to ~/grabha/logs which resolves to /root/grabha/logs
 RUN mkdir -p /root/grabha/logs
 
