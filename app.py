@@ -1,7 +1,8 @@
 from flask import Flask, request, jsonify, send_file, Response, send_from_directory
 from flask_cors import CORS
 import yt_dlp
-import os, sys, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib, shutil, signal
+import os, sys, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib, shutil, signal, base64
+from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -22,6 +23,58 @@ def get_cookiefile(url: str):
         if domain in url and os.path.exists(path):
             return path
     return None
+
+
+_IG_SHORTCODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+
+
+def resolve_instagram_share(url: str):
+    """Rewrite an Instagram highlight share link into a URL yt-dlp supports.
+
+    The app's Share button produces instagram.com/s/<base64>?story_media_id=<pk>,
+    where <base64> decodes to "highlight:<id>". yt-dlp rejects that as an
+    unsupported URL; it only knows /stories/highlights/<id>/, which extracts
+    the *whole* highlight as a playlist. Returns (url, shortcode) — shortcode
+    identifies the one shared item within it (None if not a share link).
+    """
+    m = re.match(r'https?://(?:www\.)?instagram\.com/s/([A-Za-z0-9_=-]+)', url)
+    if not m:
+        return url, None
+    token = m.group(1)
+    try:
+        decoded = base64.urlsafe_b64decode(token + '=' * (-len(token) % 4)).decode()
+    except Exception:
+        return url, None
+    kind, _, highlight_id = decoded.partition(':')
+    if kind != 'highlight' or not highlight_id.isdigit():
+        return url, None
+    new_url = f'https://www.instagram.com/stories/highlights/{highlight_id}/'
+
+    # story_media_id is the numeric media pk (sometimes "<pk>_<user_id>");
+    # yt-dlp identifies entries by shortcode, which is the pk in base64.
+    pk = parse_qs(urlparse(url).query).get('story_media_id', [''])[0].split('_')[0]
+    if not pk.isdigit():
+        return new_url, None
+    n, shortcode = int(pk), ''
+    while n:
+        n, r = divmod(n, 64)
+        shortcode = _IG_SHORTCODE_ALPHABET[r] + shortcode
+    return new_url, shortcode
+
+
+def extract_story_item(ydl, url, shortcode, download):
+    """Extract (and optionally download) one item of a highlight.
+
+    Resolves the highlight's entries without processing them, then processes
+    only the matching one — so the returned info (title, thumbnail, duration)
+    is that item's, not the highlight's.
+    """
+    playlist = ydl.extract_info(url, download=False, process=False)
+    entry = next((e for e in (playlist or {}).get('entries') or []
+                  if e and e.get('id') == shortcode), None)
+    if entry is None:
+        raise Exception('That story is no longer in the highlight (or needs a login we don\'t have)')
+    return ydl.process_ie_result(entry, download=download)
 
 DOWNLOAD_DIR = '/tmp/grabha'
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -306,6 +359,7 @@ def _ts(t):
 
 def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=None):
     jobs[job_id]['status'] = 'downloading'
+    url, story_item = resolve_instagram_share(url)
     output_path = os.path.join(DOWNLOAD_DIR, job_id)
     os.makedirs(output_path, exist_ok=True)
     log_id = jobs[job_id].get('log_id')
@@ -415,7 +469,12 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
     for attempt in range(1, max_attempts + 1):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
+                # A highlight share link names one item; the highlight URL
+                # would otherwise download every item in it.
+                if story_item:
+                    info = extract_story_item(ydl, url, story_item, download=True)
+                else:
+                    info = ydl.extract_info(url, download=True)
                 if info is None:
                     raise Exception('Could not extract info — content may be private, expired, or require login')
                 title    = info.get('title', 'video')
@@ -474,9 +533,13 @@ def get_info():
     url = (request.json or {}).get('url', '').strip()
     if not url:
         return jsonify({'error': 'No URL'}), 400
+    url, story_item = resolve_instagram_share(url)
     try:
         with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True, 'cookiefile': get_cookiefile(url), 'js_runtimes': {'node': {}}, 'remote_components': {'ejs:github'}}) as ydl:
-            info = ydl.extract_info(url, download=False)
+            if story_item:
+                info = extract_story_item(ydl, url, story_item, download=False)
+            else:
+                info = ydl.extract_info(url, download=False)
         if info is None:
             raise Exception('Could not extract info — content may be private, expired, or require login')
         return jsonify({
