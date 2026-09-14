@@ -74,6 +74,10 @@ def extract_story_item(ydl, url, shortcode, download):
                   if e and e.get('id') == shortcode), None)
     if entry is None:
         raise Exception('That story is no longer in the highlight (or needs a login we don\'t have)')
+    # Unprocessed entries don't carry the extractor name; without it the
+    # activity log records the platform as 'Unknown'.
+    for key in ('extractor_key', 'extractor'):
+        entry.setdefault(key, playlist.get(key))
     return ydl.process_ie_result(entry, download=download)
 
 DOWNLOAD_DIR = '/tmp/grabha'
