@@ -19,7 +19,7 @@ was missing the `/api` prefix and named routes that don't exist.)
 ## Rules
 - All SQLite writes require `_db_lock` (Flask is multi-threaded).
 - **Clipping must not select an HLS format.** When `clip_start`/`clip_end` are
-  set, `run_download()` sets `ydl_opts['format_sort'] = ['proto', 'res', 'br']`.
+  set, `run_download()` sets `ydl_opts['format_sort'] = ['proto', res_sort, 'br']`.
   Clipping runs through ffmpeg's `-ss`, which seeks cheaply only on a plain
   HTTPS URL (HTTP range request); on an HLS playlist ffmpeg walks segments
   from the start and discards them. YouTube's "Premium" renditions (itag 616
@@ -63,7 +63,7 @@ was missing the `/api` prefix and named routes that don't exist.)
   `requirements.txt`. Without both, yt-dlp's JS-challenge solver silently
   reports every runtime as "unsupported" and YouTube extraction degrades —
   no exception is raised, so this fails silently.
-- `run_download()`'s `quality_map` is platform-conditional: pre-muxed mp4
+- `run_download()`'s `video_format` is platform-conditional: pre-muxed mp4
   (`best[ext=mp4]` first) only for Instagram/Facebook, where it's needed to
   avoid VP9-DASH merges that play back as audio-only. Everywhere else
   (notably YouTube) prefer adaptive `bestvideo+bestaudio` first — YouTube's
@@ -72,6 +72,17 @@ was missing the `/api` prefix and named routes that don't exist.)
   Don't re-widen the mp4-first branch to apply globally again (this was
   the exact regression fixed 2026-07-13, originally introduced by a fix
   for the Instagram-only issue that was accidentally applied everywhere).
+- **YouTube must prefer H.264 + AAC** (`bestvideo[vcodec~='^(avc|h264)']+bestaudio[acodec^=mp4a]`
+  first, plain `bestvideo+bestaudio` only as fallback). YouTube's top adaptive
+  video is now AV1 with Opus audio; muxed into mp4 it plays audio-only on most
+  phones and iOS Photos won't save it — the server still reports success
+  (fixed 2026-09-17). Cost: "best" tops out at 1080p, the highest H.264 rung.
+- **Quality caps the short side, via `format_sort` `res:N`, not a
+  `[height<=N]` filter.** A height filter capped the long side of vertical
+  video, so a 1080x1920 Short at "480" came out 240x426 (fixed 2026-09-17).
+  On Instagram/Facebook the cap often has no effect: the only H.264 file is
+  usually a single size, and smaller renditions are VP9/AV1-only — compatible
+  playback wins over hitting the requested size.
 
 ## Deploy
 Container via `Dockerfile`, built and pushed to `sreeh007/grabha-api:latest`

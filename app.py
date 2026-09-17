@@ -393,23 +393,21 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
     # file most players show as audio-only, so prefer their pre-muxed mp4
     # (picks the H.264 variant) first. YouTube's pre-muxed mp4 (itag 18) has
     # no such issue but is sometimes served truncated/throttled regardless of
-    # auth, so for everything else prefer the adaptive bestvideo+bestaudio.
+    # auth, so for everything else prefer the adaptive bestvideo+bestaudio —
+    # but H.264 + AAC first. YouTube's top adaptive video is now AV1 (e.g.
+    # itag 399) with Opus audio; muxed into mp4 that plays audio-only on most
+    # phones and iOS Photos refuses to save it. Same resolution in H.264 up to
+    # 1080p; anything without H.264 falls through to the old selection.
     if any(d in url for d in ('instagram.com', 'facebook.com', 'fb.watch')):
-        quality_map = {
-            'best': 'best[ext=mp4]/bestvideo+bestaudio/best',
-            '1080': 'best[ext=mp4][height<=1080]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-            '720':  'best[ext=mp4][height<=720]/bestvideo[height<=720]+bestaudio/best[height<=720]/best',
-            '480':  'best[ext=mp4][height<=480]/bestvideo[height<=480]+bestaudio/best[height<=480]/best',
-            '360':  'best[ext=mp4][height<=360]/bestvideo[height<=360]+bestaudio/best[height<=360]/best',
-        }
+        video_format = 'best[ext=mp4]/bestvideo+bestaudio/best'
     else:
-        quality_map = {
-            'best': 'bestvideo+bestaudio/best[ext=mp4]/best',
-            '1080': 'bestvideo[height<=1080]+bestaudio/best[ext=mp4][height<=1080]/best[height<=1080]',
-            '720':  'bestvideo[height<=720]+bestaudio/best[ext=mp4][height<=720]/best[height<=720]',
-            '480':  'bestvideo[height<=480]+bestaudio/best[ext=mp4][height<=480]/best[height<=480]',
-            '360':  'bestvideo[height<=360]+bestaudio/best[ext=mp4][height<=360]/best[height<=360]',
-        }
+        video_format = "bestvideo[vcodec~='^(avc|h264)']+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best[ext=mp4]/best"
+
+    # The quality menu's 480p/360p etc. mean the short side, as they do for
+    # landscape video. A [height<=N] filter capped the long side instead, so a
+    # vertical 1080x1920 Short at "480" came out 240x426. yt-dlp's res sort
+    # field is min(width, height); res:N prefers the largest at or under N.
+    res_sort = f'res:{quality}' if quality in ('1080', '720', '480', '360') else 'res'
 
     cookiefile = get_cookiefile(url)
 
@@ -431,7 +429,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
         }
     else:
         ydl_opts = {
-            'format': quality_map.get(quality, 'bestvideo+bestaudio/best'),
+            'format': video_format,
             'outtmpl': os.path.join(output_path, '%(title).60s.%(ext)s'),
             'trim_file_name': 200,
             'merge_output_format': 'mp4',
@@ -440,6 +438,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             'no_warnings': True,
             'noplaylist': True,
             'cookiefile': cookiefile,
+            'format_sort': [res_sort],
         }
 
     # Required for YouTube JS challenge solving (EJS)
@@ -463,7 +462,7 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
         # equivalent progressive format on codec, so they get picked by
         # default — sort protocol first, then fall back to the usual quality
         # ordering, to keep the highest resolution that is actually seekable.
-        ydl_opts['format_sort'] = ['proto', 'res', 'br']
+        ydl_opts['format_sort'] = ['proto', res_sort, 'br']
 
     # YouTube's PO-token fetch is occasionally flaky (yt-dlp-ejs/network),
     # producing a transient "ffmpeg exited with code 8" / HTTP 403 that a
