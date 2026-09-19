@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file, Response, send_from_directory
 from flask_cors import CORS
 import yt_dlp
-import os, sys, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib, shutil, signal, base64
+import os, sys, uuid, threading, time, re, sqlite3, logging, urllib.request, json, hmac, hashlib, shutil, signal, base64, subprocess
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -361,6 +361,50 @@ def _ts(t):
         return 0.0
 
 
+def _validate_media(path):
+    """Return an error string if `path` is not a playable media file, else None.
+
+    yt-dlp exiting 0 does not mean the output is usable: a post-live HLS
+    manifest yields a 261-byte mp4 with a valid header and an empty mdat, which
+    reports as a successful download but plays nothing. ffprobe is the cheap
+    authoritative check — no decodable stream, or no duration, means no media.
+    """
+    try:
+        if os.path.getsize(path) < 4096:
+            return 'Download produced an empty file — no media data was received.'
+    except OSError as err:
+        return f'Download produced no readable file ({err}).'
+
+    try:
+        out = subprocess.run(
+            ['ffprobe', '-v', 'error',
+             '-show_entries', 'format=duration',
+             '-show_entries', 'stream=codec_type',
+             '-of', 'default=nw=1', path],
+            capture_output=True, text=True, timeout=60,
+        )
+    except Exception:
+        return None  # ffprobe unavailable/slow — don't block an otherwise fine file
+
+    if out.returncode != 0:
+        return 'Download produced a file that is not valid media.'
+
+    text = out.stdout or ''
+    if 'codec_type=' not in text:
+        return 'Download produced a file with no audio or video stream.'
+
+    duration = None
+    for line in text.splitlines():
+        if line.startswith('duration='):
+            try:
+                duration = float(line.split('=', 1)[1])
+            except ValueError:
+                duration = None
+    if duration is None or duration <= 0:
+        return 'Download produced a file with no playable content (zero duration).'
+    return None
+
+
 def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=None):
     jobs[job_id]['status'] = 'downloading'
     url, story_item = resolve_instagram_share(url)
@@ -371,9 +415,9 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
 
     # Log clip info if set
     if clip_start or clip_end:
-        s = clip_start or '0:00:00'
-        e = clip_end   or 'end'
-        jobs[job_id]['log'].append(f'[info] clip section: {s} → {e}')
+        log_s = clip_start or '0:00:00'
+        log_e = clip_end   or 'end'
+        jobs[job_id]['log'].append(f'[info] clip section: {log_s} → {log_e}')
 
     def progress_hook(d):
         if jobs[job_id].get('cancelled'):
@@ -448,11 +492,43 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
     # yt-dlp defaults to no socket timeout, so a stalled read blocks forever.
     ydl_opts['socket_timeout'] = 30
 
+    # A stream that is live, upcoming, or just-ended has no finished file to
+    # download. In 'post_live' (ended, YouTube still processing the VOD) only
+    # the live-DVR HLS manifest is served: ffmpeg gets no usable segments,
+    # writes a 261-byte ftyp+empty-mdat mp4 and exits 0, so yt-dlp reports
+    # success and the user gets an unplayable file. Reject it with a message
+    # that says to retry later instead. match_filter runs after extraction
+    # and its exceptions propagate out of extract_info.
+    def _reject_unready_live(info, *, incomplete=False):
+        status = info.get('live_status')
+        if status == 'is_live':
+            raise Exception(
+                'This is a live stream that is still running. '
+                'Wait until it ends and YouTube finishes processing it, then try again.'
+            )
+        if status == 'is_upcoming':
+            raise Exception('This stream has not started yet.')
+        if status == 'post_live':
+            raise Exception(
+                'This live stream has just ended and YouTube is still processing the '
+                'recording. Only a partial live feed is available right now — '
+                'try again in a little while.'
+            )
+        return None
+
+    ydl_opts['match_filter'] = _reject_unready_live
+
     # Apply clip section if provided
     if clip_start or clip_end:
-        s = clip_start or '0:00:00'
-        e = clip_end   or 'inf'
-        ydl_opts['download_ranges'] = lambda info, ytdl: [{'start_time': _ts(s), 'end_time': _ts(e)}]
+        clip_s = clip_start or '0:00:00'
+        clip_e = clip_end   or 'inf'
+        # Bound as defaults, not closure vars: `except Exception as e` below
+        # rebinds and then deletes `e` at block exit, so a lambda closing over
+        # a bare `e` broke on the retry attempt with a confusing
+        # "cannot access free variable 'e'" instead of the real error.
+        ydl_opts['download_ranges'] = (
+            lambda info, ytdl, _s=clip_s, _e=clip_e: [{'start_time': _ts(_s), 'end_time': _ts(_e)}]
+        )
         ydl_opts['force_keyframes_at_cuts'] = True
         # Clipping runs through ffmpeg's -ss, which can only seek cheaply on a
         # plain HTTPS URL (HTTP range request). On an HLS playlist ffmpeg walks
@@ -488,6 +564,15 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             files = os.listdir(output_path)
             if files:
                 file_path = os.path.join(output_path, files[0])
+                bad = _validate_media(file_path)
+                if bad:
+                    jobs[job_id]['status'] = 'error'
+                    jobs[job_id]['error']  = bad
+                    jobs[job_id]['log'].append(f'[error] {bad}')
+                    shutil.rmtree(output_path, ignore_errors=True)
+                    if log_id:
+                        update_log_record(log_id, title, platform, 'error', bad)
+                    return
                 jobs[job_id]['status']   = 'done'
                 jobs[job_id]['file']     = file_path
                 jobs[job_id]['filename'] = files[0]
