@@ -2,6 +2,14 @@ cookies/
 *.txt
 __pycache__/
 *.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+*.log
+*.db
+*.sqlite3
 .env
+.env.*
 logs/
 tools/cookie_refresh.log
