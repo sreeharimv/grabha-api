@@ -433,16 +433,17 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
         elif d['status'] == 'finished':
             jobs[job_id]['log'].append('[download] processing file…')
 
-    # Instagram/Facebook only serve VP9 DASH streams; merging them produces a
-    # file most players show as audio-only, so prefer their pre-muxed mp4
-    # (picks the H.264 variant) first. YouTube's pre-muxed mp4 (itag 18) has
-    # no such issue but is sometimes served truncated/throttled regardless of
-    # auth, so for everything else prefer the adaptive bestvideo+bestaudio —
-    # but H.264 + AAC first. YouTube's top adaptive video is now AV1 (e.g.
-    # itag 399) with Opus audio; muxed into mp4 that plays audio-only on most
-    # phones and iOS Photos refuses to save it. Same resolution in H.264 up to
-    # 1080p; anything without H.264 falls through to the old selection.
-    if any(d in url for d in ('instagram.com', 'facebook.com', 'fb.watch')):
+    # Instagram only serves VP9 DASH streams; merging them produces a
+    # file most players show as audio-only, so prefer its pre-muxed mp4
+    # (picks the H.264 variant) first. Facebook serves DASH in H.264 (e.g.
+    # 720p/360p + AAC) while its pre-muxed 'hd' mp4 is VP9, so Facebook must
+    # prefer H.264 adaptive first just like YouTube. YouTube's pre-muxed mp4
+    # (itag 18) is sometimes served truncated/throttled regardless of auth,
+    # and its top adaptive video is AV1 (e.g. itag 399) with Opus audio; muxed
+    # into mp4 that plays audio-only on most phones and iOS Photos refuses to
+    # save it. Preferring H.264 + AAC first caps "best" at 1080p, falling
+    # through to generic selection only when H.264 is unavailable.
+    if any(d in url for d in ('instagram.com', 'instagr.am')):
         video_format = 'best[ext=mp4]/bestvideo+bestaudio/best'
     else:
         video_format = "bestvideo[vcodec~='^(avc|h264)']+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best[ext=mp4]/best"

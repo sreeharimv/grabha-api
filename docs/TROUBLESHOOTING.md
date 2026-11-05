@@ -20,7 +20,7 @@ The catch-all static route serves the bind-mounted `grabha-web` checkout, so any
 
 ## 5. YouTube downloads intermittently producing tiny/truncated files
 
-YouTube's pre-muxed mp4 (itag 18) is sometimes served truncated or throttled regardless of auth/cookies — the download still "succeeds." A fix that made pre-muxed mp4 preferred (needed for Instagram/Facebook) was accidentally applied platform-wide and reintroduced this on YouTube; reverted to adaptive-first for everything except Instagram/Facebook on 2026-07-13. See [DECISIONS.md](DECISIONS.md#pre-muxed-mp4-first-is-instagramfacebook-only-not-global).
+YouTube's pre-muxed mp4 (itag 18) is sometimes served truncated or throttled regardless of auth/cookies — the download still "succeeds." A fix that made pre-muxed mp4 preferred (needed for Instagram) was accidentally applied platform-wide and reintroduced this on YouTube; reverted to adaptive-first for everything except Instagram on 2026-07-13. See [DECISIONS.md](DECISIONS.md#pre-muxed-mp4-first-is-instagram-only-not-global-or-facebook).
 
 ## 6. YouTube downloads playing audio-only on phones / refused by iOS Photos
 
@@ -41,3 +41,7 @@ A manual `docker build`/`push` from a stale or uncommitted local `app.py` overwr
 ## 10. Cron auto-deploy failing silently for weeks
 
 The auto-deploy script's log (`/tmp/grabha-deploy.log`) held 639 lines of nothing but `Could not resolve host: github.com` — but a manual run at the time showed DNS/networking was fine, so those failures were stale (from an earlier version of the script or a past outage window, neither timestamped). The real problem was **observability, not DNS**: the old script was silent on every outcome (no-op, success, and failure all looked identical from outside), so a real failure could go unnoticed for weeks. Fixed 2026-07-14: the script now writes a timestamped line every run (`up to date`, `deploying...`, `FAILED: <step>`, or `deploy done`), and fetch errors are captured instead of discarded. Confirmed working 2026-09-08 against two real pushes. See [DEPLOYMENT.md](DEPLOYMENT.md).
+
+## 11. Facebook downloads failing to send over WhatsApp or save to mobile galleries
+
+A Facebook download reported `success`, but the resulting MP4 file held VP9 video (`vp09` / `libeve-vp9`) + AAC audio. WhatsApp rejected the file ("file format not supported"), and phone galleries (especially iOS Photos) refused to save it. Root cause: Grabha grouped Facebook with Instagram under `best[ext=mp4]/bestvideo+bestaudio/best`. While Instagram serves VP9-only DASH and H.264 pre-muxed mp4, Facebook does the opposite: its pre-muxed 'hd' mp4 is VP9, while its DASH video streams (`2357551071652739v` at 720p, `1154407046860840v` at 360p) are H.264 (`avc1`) with AAC audio (`mp4a`). Fix: removed Facebook from the Instagram `best[ext=mp4]`-first exception so Facebook uses `bestvideo[vcodec~='^(avc|h264)']+bestaudio[acodec^=mp4a]`, yielding a universally compatible H.264+AAC MP4. See [DECISIONS.md](DECISIONS.md#pre-muxed-mp4-first-is-instagram-only-not-global-or-facebook).

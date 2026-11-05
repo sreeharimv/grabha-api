@@ -26,11 +26,11 @@ When `clip_start`/`clip_end` are set, `run_download()` sets `ydl_opts['format_so
 
 **Why:** Clipping runs through ffmpeg's `-ss`, which seeks cheaply only on a plain HTTPS URL (HTTP range request). On an HLS playlist, ffmpeg walks every segment from the start of the stream and discards the ones before the clip point. YouTube's "Premium" renditions (itag 616 and similar) are HLS-only and win on codec preference by default without this sort — a 17-second clip from a 2h35m video read ~150MB and wrote nothing for 8m25s before this fix.
 
-## Pre-muxed mp4 first is Instagram/Facebook-only, not global
+## Pre-muxed mp4 first is Instagram-only, not global or Facebook
 
-`video_format` branches on platform: `best[ext=mp4]/bestvideo+bestaudio/best` for Instagram/Facebook only; everything else (notably YouTube) prefers adaptive `bestvideo+bestaudio` first (subject to the H.264+AAC preference above).
+`video_format` branches on platform: `best[ext=mp4]/bestvideo+bestaudio/best` for Instagram only; everything else (including Facebook and YouTube) prefers adaptive H.264+AAC first (`bestvideo[vcodec~='^(avc|h264)']+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best[ext=mp4]/best`).
 
-**Why:** Instagram/Facebook only serve VP9-DASH adaptive streams, and merging those produces a file most players show as audio-only — so pre-muxed mp4 is necessary there. But YouTube's pre-muxed mp4 (itag 18) is sometimes served truncated/throttled by YouTube regardless of auth/cookies, silently producing a tiny "successful" download — so the same pre-muxed-first branch must *not* apply to YouTube. This exact regression happened once already: a fix scoped to Instagram was accidentally applied globally, broke YouTube downloads, and was reverted 2026-07-13. Don't re-widen the Instagram/Facebook branch to apply platform-wide again.
+**Why:** Instagram only serves VP9-DASH adaptive streams, and merging those produces a file most players show as audio-only — so pre-muxed mp4 is necessary there. Facebook, however, serves DASH video in H.264 (e.g. 720p/360p) with AAC audio while its pre-muxed 'hd' mp4 is VP9. Grouping Facebook with Instagram caused Facebook downloads to pick the VP9 file, which WhatsApp and mobile galleries reject. YouTube's pre-muxed mp4 (itag 18) is throttled/truncated by YouTube. Thus, only Instagram uses pre-muxed mp4 first. Don't re-widen the Instagram branch to apply to Facebook or platform-wide again.
 
 ## yt-dlp tracks the nightly channel, not stable PyPI releases
 
