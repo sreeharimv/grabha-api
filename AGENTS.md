@@ -29,15 +29,20 @@ This repository is one part of a larger project. The outer `grabha/` folder is i
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — local dev setup, dependency/runtime requirements, schema-migration convention.
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — CI/CD pipeline, auto-deploy mechanics, manual deploy procedure, drift detection.
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — known issues, root causes, fixes, and operational incidents — read before assuming a past bug is fixed everywhere it could recur.
-- `CLAUDE.md` — Claude Code-specific behavior only, not project knowledge.
-- `GEMINI.md` — Gemini-specific adapter.
+- `CLAUDE.md` — symlinked to `AGENTS.md` for backward compatibility across both Antigravity and Claude.
+
+## Durable Knowledge & Context Updates
+
+- **Update After Each Task**: At the end of every task touching `grabha-api`, review and update this `AGENTS.md` and relevant `docs/` files (e.g. `docs/API.md`, `docs/STATUS.md`, `docs/TROUBLESHOOTING.md`) to reflect any changes to endpoints, dependencies, lifecycle handling, or deployment before concluding the task.
+- **Single Source of Truth**: All AI agents read and update `AGENTS.md`. `CLAUDE.md` is symlinked to `AGENTS.md`.
+- **Scope**: Keep documentation updates strictly scoped to verified code, architecture, and project status. Do not log conversational transcripts, session logs, or ephemeral debugging notes.
 
 ## Hard Constraints — do not change without explicit user authorization
 
 - **`app.py` stays a single file.** Don't split it into modules.
 - **Never commit `.env`**, cookie files, or anything under `logs/` — see `.gitignore`.
 - Don't remove or weaken any of the three job-terminal-state mechanisms (watchdog, ffmpeg-kill-on-`job_id`, startup reconciliation of orphaned `pending` rows) — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#job-lifecycle-and-terminal-states). Removing any one of them can leave activity rows stuck `pending` indefinitely; this has happened in production before.
-- Don't drop `format_sort = ['proto', res_sort, 'br']` for clipped downloads, or widen the Instagram/Facebook pre-muxed-mp4-first format string to apply platform-wide — both were fixes for specific regressions. See [docs/DECISIONS.md](docs/DECISIONS.md).
+- Don't drop `format_sort = ['proto', res_sort, 'br']` for clipped downloads, or widen the Instagram pre-muxed-mp4-first format string to apply platform-wide — both were fixes for specific regressions. See [docs/DECISIONS.md](docs/DECISIONS.md).
 - Don't rebuild/push the Docker image by hand on the server as a deploy shortcut — see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). This has previously put production on code matching no git commit at all.
 - Always confirm with the user before pushing to `main` — pushes trigger a real production auto-deploy within roughly 15 minutes (via cron) once CI finishes building the image.
 
