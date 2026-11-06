@@ -405,6 +405,73 @@ def _validate_media(path):
     return None
 
 
+def _ensure_mobile_compatible_video(file_path, job_id=None):
+    """Ensure MP4 video files use mobile-friendly codecs (H.264 video, AAC audio).
+
+    If the video stream is VP9, AV1, or another non-H.264 codec inside an MP4,
+    mobile players show a black screen and iOS Photos / galleries refuse to save it.
+    Transcodes non-H.264 video to H.264 (libx264) and non-AAC/MP3 audio to AAC.
+    """
+    try:
+        out = subprocess.run(
+            ['ffprobe', '-v', 'error',
+             '-show_entries', 'stream=codec_type,codec_name',
+             '-of', 'json', file_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        if out.returncode != 0:
+            return
+        data = json.loads(out.stdout)
+        streams = data.get('streams', [])
+        video_stream = next((s for s in streams if s.get('codec_type') == 'video'), None)
+        audio_stream = next((s for s in streams if s.get('codec_type') == 'audio'), None)
+
+        if not video_stream:
+            return
+
+        vcodec = video_stream.get('codec_name', '').lower()
+        acodec = audio_stream.get('codec_name', '').lower() if audio_stream else None
+
+        # H.264 is universally supported across mobile players, iOS Photos, and WhatsApp.
+        needs_vtranscode = vcodec not in ('h264',)
+        # Audio inside MP4 should be AAC (or MP3)
+        needs_atranscode = acodec is not None and acodec not in ('aac', 'mp3')
+
+        if not needs_vtranscode and not needs_atranscode:
+            return
+
+        if job_id and job_id in jobs:
+            jobs[job_id]['log'].append(
+                f'[postprocess] transcoding {vcodec} video to H.264 for mobile compatibility…'
+            )
+
+        temp_out = file_path + '.transcode.mp4'
+        cmd = ['ffmpeg', '-y', '-i', file_path]
+        if needs_vtranscode:
+            cmd.extend(['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23'])
+        else:
+            cmd.extend(['-c:v', 'copy'])
+
+        if needs_atranscode:
+            cmd.extend(['-c:a', 'aac', '-b:a', '192k'])
+        else:
+            cmd.extend(['-c:a', 'copy'])
+
+        cmd.extend(['-movflags', '+faststart', temp_out])
+
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if res.returncode == 0 and os.path.exists(temp_out) and os.path.getsize(temp_out) > 4096:
+            os.replace(temp_out, file_path)
+            if job_id and job_id in jobs:
+                jobs[job_id]['log'].append('[postprocess] conversion complete')
+        else:
+            if os.path.exists(temp_out):
+                os.remove(temp_out)
+    except Exception as e:
+        if job_id and job_id in jobs:
+            jobs[job_id]['log'].append(f'[postprocess] note: transcode check skipped ({e})')
+
+
 def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=None):
     jobs[job_id]['status'] = 'downloading'
     url, story_item = resolve_instagram_share(url)
@@ -435,16 +502,18 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
 
     # Instagram only serves VP9 DASH streams; merging them produces a
     # file most players show as audio-only, so prefer its pre-muxed mp4
-    # (picks the H.264 variant) first. Facebook serves DASH in H.264 (e.g.
-    # 720p/360p + AAC) while its pre-muxed 'hd' mp4 is VP9, so Facebook must
-    # prefer H.264 adaptive first just like YouTube. YouTube's pre-muxed mp4
-    # (itag 18) is sometimes served truncated/throttled regardless of auth,
-    # and its top adaptive video is AV1 (e.g. itag 399) with Opus audio; muxed
-    # into mp4 that plays audio-only on most phones and iOS Photos refuses to
-    # save it. Preferring H.264 + AAC first caps "best" at 1080p, falling
-    # through to generic selection only when H.264 is unavailable.
+    # (picks the H.264 variant) first. Facebook serves DASH either in H.264 or
+    # in VP9, and its pre-muxed 'hd' is sometimes VP9 and sometimes H.264.
+    # Therefore, Facebook prefers adaptive H.264 first, but falls back to
+    # pre-muxed mp4 ('hd'/'sd') before generic VP9 bestvideo+bestaudio.
+    # YouTube's pre-muxed mp4 (itag 18) is sometimes served truncated/throttled
+    # regardless of auth, and its top adaptive video is AV1 with Opus audio.
+    # Preferring H.264 + AAC first caps "best" at 1080p. Any non-H.264 output
+    # (VP9/AV1) is safely transcoded to H.264 in _ensure_mobile_compatible_video.
     if any(d in url for d in ('instagram.com', 'instagr.am')):
         video_format = 'best[ext=mp4]/bestvideo+bestaudio/best'
+    elif any(d in url for d in ('facebook.com', 'fb.watch', 'fb.com')):
+        video_format = "bestvideo[vcodec~='^(avc|h264)']+bestaudio[acodec^=mp4a]/best[ext=mp4]/bestvideo+bestaudio/best"
     else:
         video_format = "bestvideo[vcodec~='^(avc|h264)']+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best[ext=mp4]/best"
 
@@ -574,6 +643,8 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
                     if log_id:
                         update_log_record(log_id, title, platform, 'error', bad)
                     return
+                if format_type != 'mp3':
+                    _ensure_mobile_compatible_video(file_path, job_id)
                 jobs[job_id]['status']   = 'done'
                 jobs[job_id]['file']     = file_path
                 jobs[job_id]['filename'] = files[0]
