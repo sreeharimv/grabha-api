@@ -25,6 +25,26 @@ def get_cookiefile(url: str):
     return None
 
 
+# What yt-dlp raises when Instagram rejects the *session* (cookie revoked or
+# soft-flagged) rather than the content. Instagram can kill a session silently
+# (no prompt in the app); since get_cookiefile() sends it on every Instagram
+# URL, a dead cookie then breaks public reels that work fine without it.
+_IG_BAD_SESSION_MARKERS = (
+    'HTTP Error 401',
+    'Instagram sent an empty media response',
+    'You need to log in',
+    'login required',
+)
+
+
+def should_retry_without_cookies(url, cookiefile, err):
+    """True if an Instagram failure looks like a dead session worth retrying anonymously."""
+    if not cookiefile or not any(d in url for d in ('instagram.com', 'instagr.am')):
+        return False
+    msg = str(err)
+    return any(m.lower() in msg.lower() for m in _IG_BAD_SESSION_MARKERS)
+
+
 _IG_SHORTCODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
 
 
@@ -614,8 +634,15 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
     # producing a transient "ffmpeg exited with code 8" / HTTP 403 that a
     # same-URL retry reliably clears. Retry once for that specific pattern
     # rather than surfacing it to the user; anything else fails immediately.
+    # Separately, an Instagram failure that looks like a dead session is retried
+    # once without cookies (see should_retry_without_cookies); that retry does
+    # not use up the transient-error attempt. If it also fails, the user sees
+    # the original (cookie) error, which is the more meaningful one.
     max_attempts = 2
-    for attempt in range(1, max_attempts + 1):
+    attempt = 0
+    cookie_error = None
+    while attempt < max_attempts:
+        attempt += 1
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 # A highlight share link names one item; the highlight URL
@@ -670,6 +697,16 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
             return
 
         except Exception as e:
+            if not jobs[job_id].get('cancelled') and \
+                    should_retry_without_cookies(url, ydl_opts.get('cookiefile'), e):
+                jobs[job_id]['log'].append(f'[retry] Instagram rejected the saved login, retrying without it: {e}')
+                app.logger.warning('instagram cookie rejected, retrying anonymously: %s', e)
+                cookie_error = str(e)
+                ydl_opts['cookiefile'] = None
+                shutil.rmtree(output_path, ignore_errors=True)
+                os.makedirs(output_path, exist_ok=True)
+                attempt -= 1
+                continue
             # A watchdog kill surfaces as "ffmpeg exited with code ..." too;
             # never retry a job that was deliberately stopped.
             transient = ('ffmpeg exited with code' in str(e) or 'HTTP Error 403' in str(e)) \
@@ -680,11 +717,14 @@ def run_download(job_id, url, format_type, quality, clip_start=None, clip_end=No
                 os.makedirs(output_path, exist_ok=True)
                 time.sleep(2)
                 continue
+            if cookie_error:
+                jobs[job_id]['log'].append(f'[error] anonymous retry also failed: {e}')
+            err = cookie_error or str(e)
             jobs[job_id]['status'] = 'error'
-            jobs[job_id]['error']  = str(e)
-            jobs[job_id]['log'].append(f'[error] {e}')
+            jobs[job_id]['error']  = err
+            jobs[job_id]['log'].append(f'[error] {err}')
             if log_id:
-                update_log_record(log_id, '', 'Unknown', 'error', str(e))
+                update_log_record(log_id, '', 'Unknown', 'error', err)
             return
 
 
@@ -694,12 +734,27 @@ def get_info():
     if not url:
         return jsonify({'error': 'No URL'}), 400
     url, story_item = resolve_instagram_share(url)
-    try:
-        with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True, 'cookiefile': get_cookiefile(url), 'js_runtimes': {'node': {}}, 'remote_components': {'ejs:github'}}) as ydl:
+
+    def _probe(cookiefile):
+        with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True, 'cookiefile': cookiefile, 'js_runtimes': {'node': {}}, 'remote_components': {'ejs:github'}}) as ydl:
             if story_item:
-                info = extract_story_item(ydl, url, story_item, download=False)
-            else:
-                info = ydl.extract_info(url, download=False)
+                return extract_story_item(ydl, url, story_item, download=False)
+            return ydl.extract_info(url, download=False)
+
+    try:
+        cookiefile = get_cookiefile(url)
+        try:
+            info = _probe(cookiefile)
+        except Exception as e:
+            # Same dead-session fallback as run_download; on a second failure
+            # report the original error, not the anonymous one.
+            if not should_retry_without_cookies(url, cookiefile, e):
+                raise
+            app.logger.warning('instagram cookie rejected, retrying anonymously: %s', e)
+            try:
+                info = _probe(None)
+            except Exception:
+                raise e
         if info is None:
             raise Exception('Could not extract info — content may be private, expired, or require login')
         return jsonify({
